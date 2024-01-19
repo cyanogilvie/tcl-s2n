@@ -1,0 +1,20 @@
+source [file join [file dirname [info script]] common.tcl]
+
+test basic-1.1 {Negotiate as a client with www.google.com} -body { #<<<
+	set sock	[socket www.google.com 443]
+	s2n::push $sock
+	chan configure $sock -buffering none -translation crlf -encoding ascii
+	puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	read $sock
+} -cleanup {
+	if {[info exists sock] && $sock in [chan names]} {close $sock}
+	unset -nocomplain sock
+} -match glob -result {HTTP/1.1 200 *}
+#>>>
+
+
+# cleanup
+::tcltest::cleanupTests
+return
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4

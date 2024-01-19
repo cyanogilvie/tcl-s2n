@@ -1,0 +1,17 @@
+source [file join [file dirname [info script]] common.tcl]
+
+test example-1.1 {GET https://www.google.com} -body { #<<<
+	set sock [socket -async www.google.com 443]
+	s2n::push $sock
+	chan configure $sock -buffering none -translation crlf -encoding ascii
+	puts $sock "GET / HTTP/1.1\nHost: www.google.com\nConnection: close\n"
+	puts [read $sock]
+	close $sock
+} -match glob -result {} -output {HTTP/1.1 200 *}
+#>>>
+
+# cleanup
+::tcltest::cleanupTests
+return
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4

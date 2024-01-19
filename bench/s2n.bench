@@ -1,0 +1,14 @@
+if {"bench" ni [info commands bench]} {
+	package require bench
+	namespace import bench::*
+}
+
+package require s2n
+
+proc main {} {
+	puts "Nothing to benchmark yet"
+}
+
+main
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4
