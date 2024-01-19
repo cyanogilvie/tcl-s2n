@@ -404,8 +404,6 @@ clean:
 	-rm -rf local
 
 deps-clean:
-	make -C deps/aws-lc clean
-	make -C deps/s2n-tls prefix=$(top_builddir)/local LIBCRYPTO_ROOT=$(top_builddir)/local clean
 
 distclean: clean
 	-rm -f *.tab.c
