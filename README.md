@@ -6,8 +6,7 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 **package require s2n** ?0.1?
 
-**s2n::push** *channelName* ?**-role** **client**|**server**?
-?**-servername** *host*?
+**s2n::push** *channelName* ?*-opt* *val* …?
 
 ## DESCRIPTION
 
@@ -20,10 +19,17 @@ for the libcrypto implementation.
 
   - **s2n::push** *channelName* ?*-opt* *val* …?  
     Stack a TLS protocol driver onto the channel *channelName*. See
-    **OPTIONS** for the options supported. The TLS protocol driver may
-    be removed with the standard **chan pop** *channelName* Tcl command.
+    **OPTIONS** for the allowed options. The TLS protocol driver may be
+    removed with the standard **chan pop** *channelName* Tcl command.
+    The *channelName* channel may be blocking or non-blocking, and may
+    be a socket created with **-async** and still be waiting for the
+    connection to complete.
 
 ## OPTIONS
+
+  - **-config** *config*  
+    Override the default configuration for the channel, see **CONFIG**
+    for details.
 
   - **-role** **client**|**server**  
     Set the role the TLS driver will play in the TLS handshake. If
@@ -33,7 +39,40 @@ for the libcrypto implementation.
 
   - **-servername** *host*  
     Set the SNI (Server Name Indication) name to send when handshaking
-    as a client.
+    as a client. There is no default, if not present, the SNI extension
+    won’t be used. It’s also an error to set this option for server
+    connections.
+
+  - **-prefer** **throughput**|**latency**  
+    Tune the implementation to optimise for throughput (large frames,
+    fewer syscalls) or latency (smaller frames, more syscalls). TODO:
+    figure out the default.
+
+## CONFIG
+
+The *config* dictionary can contain the following keys to override the
+default configuration for the connection. An error will be thrown if the
+dictionary contains any unrecognised keys.
+
+  - **session\_tickets** *bool*  
+    If set to a true boolean value, enable session tickets for this
+    connection. Session tickets are a way to bootstrap future
+    connections with a server without going through the full
+    certificate-based key exchange, enabling lower latency connection
+    establishment.
+
+  - **ticket\_lifetime** {*encrypt\_decrypt\_seconds*
+    *decrypt\_only\_seconds*}  
+    Set the time for which session tickets are valid, as a list of two
+    values. The first, *encrypt\_decrypt\_seconds* is the time for which
+    the ticket may be used to both encrypt and decrypt. The second,
+    *decrypt\_only\_seconds*, is the time during which the key cannot be
+    used to encrypt but may still decrypt.
+
+  - **cipher\_preferences** *policy*  
+    Select the set of allowed ciphers and their preferences, via the
+    *policy*, which is a security policy string as understood by s2n,
+    like “default\_tls13” or “20230317”.
 
 ## EXAMPLES
 
@@ -41,7 +80,7 @@ Connect to an HTTPS server, request /
 
 ``` tcl
 set sock    [socket www.google.com 443]
-s2n::push $sock
+s2n::push $sock -servername www.google.com
 chan configure $sock -buffering none -translation crlf -encoding ascii
 puts $sock "GET / HTTP/1.1\nHost: www.google.com\nConnection: close\n"
 puts [read $sock]
@@ -158,7 +197,8 @@ With the nature of this package a lot of care is taken with memory
 handling and test coverage. There are no known memory leaks or errors,
 and the package is routinely tested by running its test suite (which
 aims at full coverage) through valgrind. The `make valgrind`, `make
-test` and `make coverage` build targets support these goals.
+test` and `make coverage` build targets support these goals. The test
+suite is currently a long way from full coverage.
 
 ## SOURCE CODE
 

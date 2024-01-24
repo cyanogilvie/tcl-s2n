@@ -103,28 +103,47 @@
 <p>s2n Tcl wrapper - layer TLS onto Tcl channels</p>
 <h2 id="synopsis">SYNOPSIS</h2>
 <p><strong>package require s2n</strong> ?0.1?</p>
-<p><strong>s2n::push</strong> <em>channelName</em> ?<strong>-role</strong> <strong>client</strong>|<strong>server</strong>? ?<strong>-servername</strong> <em>host</em>?</p>
+<p><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?</p>
 <h2 id="description">DESCRIPTION</h2>
 <p>This package provides a channel driver that can be stacked on any Tcl channel that supports reading and writing to add TLS support. The TLS implementation uses Amazon’s s2n for the TLS implementation and aws-lc for the libcrypto implementation.</p>
 <h2 id="commands">COMMANDS</h2>
 <dl>
 <dt><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?</dt>
-<dd><p>Stack a TLS protocol driver onto the channel <em>channelName</em>. See <strong>OPTIONS</strong> for the options supported. The TLS protocol driver may be removed with the standard <strong>chan pop</strong> <em>channelName</em> Tcl command.</p>
+<dd><p>Stack a TLS protocol driver onto the channel <em>channelName</em>. See <strong>OPTIONS</strong> for the allowed options. The TLS protocol driver may be removed with the standard <strong>chan pop</strong> <em>channelName</em> Tcl command. The <em>channelName</em> channel may be blocking or non-blocking, and may be a socket created with <strong>-async</strong> and still be waiting for the connection to complete.</p>
 </dd>
 </dl>
 <h2 id="options">OPTIONS</h2>
 <dl>
+<dt><strong>-config</strong> <em>config</em></dt>
+<dd><p>Override the default configuration for the channel, see <strong>CONFIG</strong> for details.</p>
+</dd>
 <dt><strong>-role</strong> <strong>client</strong>|<strong>server</strong></dt>
 <dd><p>Set the role the TLS driver will play in the TLS handshake. If <strong>client</strong> (the default) the driver will initiate a TLS handshake otherwise it will wait to receive a ClientHello TLS message and handshake as a server.</p>
 </dd>
 <dt><strong>-servername</strong> <em>host</em></dt>
-<dd><p>Set the SNI (Server Name Indication) name to send when handshaking as a client.</p>
+<dd><p>Set the SNI (Server Name Indication) name to send when handshaking as a client. There is no default, if not present, the SNI extension won’t be used. It’s also an error to set this option for server connections.</p>
+</dd>
+<dt><strong>-prefer</strong> <strong>throughput</strong>|<strong>latency</strong></dt>
+<dd><p>Tune the implementation to optimise for throughput (large frames, fewer syscalls) or latency (smaller frames, more syscalls). TODO: figure out the default.</p>
+</dd>
+</dl>
+<h2 id="config">CONFIG</h2>
+<p>The <em>config</em> dictionary can contain the following keys to override the default configuration for the connection. An error will be thrown if the dictionary contains any unrecognised keys.</p>
+<dl>
+<dt><strong>session_tickets</strong> <em>bool</em></dt>
+<dd><p>If set to a true boolean value, enable session tickets for this connection. Session tickets are a way to bootstrap future connections with a server without going through the full certificate-based key exchange, enabling lower latency connection establishment.</p>
+</dd>
+<dt><strong>ticket_lifetime</strong> {<em>encrypt_decrypt_seconds</em> <em>decrypt_only_seconds</em>}</dt>
+<dd><p>Set the time for which session tickets are valid, as a list of two values. The first, <em>encrypt_decrypt_seconds</em> is the time for which the ticket may be used to both encrypt and decrypt. The second, <em>decrypt_only_seconds</em>, is the time during which the key cannot be used to encrypt but may still decrypt.</p>
+</dd>
+<dt><strong>cipher_preferences</strong> <em>policy</em></dt>
+<dd><p>Select the set of allowed ciphers and their preferences, via the <em>policy</em>, which is a security policy string as understood by s2n, like “default_tls13” or “20230317”.</p>
 </dd>
 </dl>
 <h2 id="examples">EXAMPLES</h2>
 <p>Connect to an HTTPS server, request /</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode tcl"><code class="sourceCode tcl"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true"></a><span class="kw">set</span> sock    <span class="kw">[socket</span> www.google.com <span class="dv">443</span><span class="kw">]</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true"></a>s2n::push <span class="dt">$sock</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true"></a>s2n::push <span class="dt">$sock</span><span class="ot"> -servername</span> www.google.com</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true"></a><span class="kw">chan</span> <span class="ot">configure</span> <span class="dt">$sock</span><span class="ot"> -buffering</span> none<span class="ot"> -translation</span> crlf<span class="ot"> -encoding</span> ascii</span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true"></a><span class="kw">puts</span> <span class="dt">$sock</span> <span class="st">&quot;GET / HTTP/1.1</span><span class="ch">\n</span><span class="st">Host: www.google.com</span><span class="ch">\n</span><span class="st">Connection: close</span><span class="ch">\n</span><span class="st">&quot;</span></span>
 <span id="cb1-5"><a href="#cb1-5" aria-hidden="true"></a><span class="kw">puts</span> <span class="kw">[read</span> <span class="dt">$sock</span><span class="kw">]</span></span>
@@ -171,7 +190,7 @@
 <p>This package is built on the <a href="https://github.com/aws/s2n-tls">s2n library</a> and the <a href="https://github.com/aws/aws-lc">aws-lc library</a>.</p>
 <h2 id="project-status">PROJECT STATUS</h2>
 <p>This is a very early work in progress.</p>
-<p>With the nature of this package a lot of care is taken with memory handling and test coverage. There are no known memory leaks or errors, and the package is routinely tested by running its test suite (which aims at full coverage) through valgrind. The <code>make valgrind</code>, <code>make test</code> and <code>make coverage</code> build targets support these goals.</p>
+<p>With the nature of this package a lot of care is taken with memory handling and test coverage. There are no known memory leaks or errors, and the package is routinely tested by running its test suite (which aims at full coverage) through valgrind. The <code>make valgrind</code>, <code>make test</code> and <code>make coverage</code> build targets support these goals. The test suite is currently a long way from full coverage.</p>
 <h2 id="source-code">SOURCE CODE</h2>
 <p>This package’s source code is available at <a href="https://github.com/cyanogilvie/tcl-s2n" class="uri">https://github.com/cyanogilvie/tcl-s2n</a>. Please create issues there for any bugs discovered.</p>
 <h2 id="license">LICENSE</h2>

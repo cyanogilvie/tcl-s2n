@@ -9,9 +9,8 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 .PP
 \f[B]package require s2n\f[R] ?0.1?
 .PP
-\f[B]s2n::push\f[R] \f[I]channelName\f[R] ?\f[B]-role\f[R]
-\f[B]client\f[R]|\f[B]server\f[R]?
-?\f[B]-servername\f[R] \f[I]host\f[R]?
+\f[B]s2n::push\f[R] \f[I]channelName\f[R] ?\f[I]-opt\f[R] \f[I]val\f[R]
+\&...?
 .SS DESCRIPTION
 .PP
 This package provides a channel driver that can be stacked on any Tcl
@@ -22,10 +21,17 @@ and aws-lc for the libcrypto implementation.
 .TP
 \f[B]s2n::push\f[R] \f[I]channelName\f[R] ?\f[I]-opt\f[R] \f[I]val\f[R] \&...?
 Stack a TLS protocol driver onto the channel \f[I]channelName\f[R].
-See \f[B]OPTIONS\f[R] for the options supported.
+See \f[B]OPTIONS\f[R] for the allowed options.
 The TLS protocol driver may be removed with the standard \f[B]chan
 pop\f[R] \f[I]channelName\f[R] Tcl command.
+The \f[I]channelName\f[R] channel may be blocking or non-blocking, and
+may be a socket created with \f[B]-async\f[R] and still be waiting for
+the connection to complete.
 .SS OPTIONS
+.TP
+\f[B]-config\f[R] \f[I]config\f[R]
+Override the default configuration for the channel, see \f[B]CONFIG\f[R]
+for details.
 .TP
 \f[B]-role\f[R] \f[B]client\f[R]|\f[B]server\f[R]
 Set the role the TLS driver will play in the TLS handshake.
@@ -36,6 +42,40 @@ and handshake as a server.
 \f[B]-servername\f[R] \f[I]host\f[R]
 Set the SNI (Server Name Indication) name to send when handshaking as a
 client.
+There is no default, if not present, the SNI extension won\[cq]t be
+used.
+It\[cq]s also an error to set this option for server connections.
+.TP
+\f[B]-prefer\f[R] \f[B]throughput\f[R]|\f[B]latency\f[R]
+Tune the implementation to optimise for throughput (large frames, fewer
+syscalls) or latency (smaller frames, more syscalls).
+TODO: figure out the default.
+.SS CONFIG
+.PP
+The \f[I]config\f[R] dictionary can contain the following keys to
+override the default configuration for the connection.
+An error will be thrown if the dictionary contains any unrecognised
+keys.
+.TP
+\f[B]session_tickets\f[R] \f[I]bool\f[R]
+If set to a true boolean value, enable session tickets for this
+connection.
+Session tickets are a way to bootstrap future connections with a server
+without going through the full certificate-based key exchange, enabling
+lower latency connection establishment.
+.TP
+\f[B]ticket_lifetime\f[R] {\f[I]encrypt_decrypt_seconds\f[R] \f[I]decrypt_only_seconds\f[R]}
+Set the time for which session tickets are valid, as a list of two
+values.
+The first, \f[I]encrypt_decrypt_seconds\f[R] is the time for which the
+ticket may be used to both encrypt and decrypt.
+The second, \f[I]decrypt_only_seconds\f[R], is the time during which the
+key cannot be used to encrypt but may still decrypt.
+.TP
+\f[B]cipher_preferences\f[R] \f[I]policy\f[R]
+Select the set of allowed ciphers and their preferences, via the
+\f[I]policy\f[R], which is a security policy string as understood by
+s2n, like \[lq]default_tls13\[rq] or \[lq]20230317\[rq].
 .SS EXAMPLES
 .PP
 Connect to an HTTPS server, request /
@@ -43,7 +83,7 @@ Connect to an HTTPS server, request /
 .nf
 \f[C]
 set sock    [socket www.google.com 443]
-s2n::push $sock
+s2n::push $sock -servername www.google.com
 chan configure $sock -buffering none -translation crlf -encoding ascii
 puts $sock \[dq]GET / HTTP/1.1\[rs]nHost: www.google.com\[rs]nConnection: close\[rs]n\[dq]
 puts [read $sock]
@@ -166,6 +206,7 @@ tested by running its test suite (which aims at full coverage) through
 valgrind.
 The \f[C]make valgrind\f[R], \f[C]make test\f[R] and
 \f[C]make coverage\f[R] build targets support these goals.
+The test suite is currently a long way from full coverage.
 .SS SOURCE CODE
 .PP
 This package\[cq]s source code is available at
