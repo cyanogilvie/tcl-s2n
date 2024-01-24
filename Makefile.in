@@ -155,6 +155,8 @@ PKG_CFLAGS	= @PKG_CFLAGS@
 #DEFS		= $(TCL_DEFS) @DEFS@ $(PKG_CFLAGS)
 DEFS		= @DEFS@ $(PKG_CFLAGS)
 
+DEBUG		= @DEBUG@
+
 # Move pkgIndex.tcl to 'BINARIES' var if it is generated in the Makefile
 CONFIG_CLEAN_FILES = Makefile pkgIndex.tcl
 CLEANFILES	= @CLEANFILES@
@@ -166,7 +168,8 @@ CFLAGS		= @CFLAGS@
 LDFLAGS		= @LDFLAGS@
 LDFLAGS_DEFAULT			= @LDFLAGS_DEFAULT@
 COMPILE		= $(CC) $(DEFS) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) \
-			  $(CFLAGS_DEFAULT) $(CFLAGS_WARNING) $(SHLIB_CFLAGS) $(CFLAGS)
+			  $(CFLAGS_DEFAULT) $(CFLAGS_WARNING) $(SHLIB_CFLAGS) $(CFLAGS) \
+			  $(DBG_DEFS)
 
 GDB		= gdb
 VALGRIND	= valgrind
@@ -486,7 +489,7 @@ uninstall-binaries:
 	  rm -f $(DESTDIR)$(bindir)/$$p; \
 	done
 
-deps: local/lib/libs2n.a
+deps: local/lib/libs2n.a local/lib/libclogs.a
 
 local/lib/libs2n.a:
 	cd $(srcdir)/deps/aws-lc && \
@@ -509,6 +512,9 @@ local/lib/libs2n.a:
 			-DCMAKE_INSTALL_PREFIX=$(top_builddir)/local && \
 		cmake --build $(top_builddir)/build/s2n-tls -j 8 && \
 		cmake --install $(top_builddir)/build/s2n-tls
+
+local/lib/libclogs.a: deps/clogs/*.c deps/clogs/*.h deps/clogs/*.def deps/clogs/Makefile
+	make -C deps/clogs clean install DESTDIR=$(top_builddir) PREFIX=/local
 
 .PHONY: all binaries clean depend distclean doc install libraries test
 .PHONY: gdb gdb-test valgrind valgrindshell deps deps-clean

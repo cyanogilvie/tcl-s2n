@@ -7,6 +7,24 @@
 #include <errno.h>
 #include <string.h>
 #include "tip445.h"
+#include "clogs.h"
+
+#ifndef DBG_HANDSHAKE
+#define DBG_HANDSHAKE 0
+#endif
+
+#ifndef DBG_IO
+#define DBG_IO 0
+#endif
+
+#ifndef DBG_LIFECYCLE
+#define DBG_LIFECYCLE 0
+#endif
+
+#undef CLOGS_DBG_PREFIX_FMT
+#undef CLOGS_DBG_PREFIX_ARGS
+#define CLOGS_DBG_PREFIX_FMT	"[%14.9f %10.3f %s:%d:%s] "
+#define CLOGS_DBG_PREFIX_ARGS	, clogs_proctime(), clogs_delta_usec(),  __FILE__, __LINE__, clogs_cstr(__func__, CLOGS_GREENISH)
 
 #define CHECK_S2N(label, var, cmd) \
 	if ((cmd) != S2N_SUCCESS) { \

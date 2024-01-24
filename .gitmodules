@@ -13,3 +13,6 @@
 	path = deps/aws-lc
 	url = https://github.com/aws/aws-lc
 	shallow = true
+[submodule "deps/clogs"]
+	path = deps/clogs
+	url = https://github.com/cyanogilvie/clogs
