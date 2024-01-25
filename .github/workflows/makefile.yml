@@ -39,7 +39,7 @@ jobs:
     - name: Build tcl-s2n
       run: |
         autoconf
-        ./configure
+        ./configure --with-tcl=/opt/tcl8.7/lib
         make dist DIST_DIR=/tmp/distcheck
 
     - name: Run tests
