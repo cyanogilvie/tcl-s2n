@@ -40,7 +40,7 @@ jobs:
       run: |
         autoconf
         ./configure --with-tcl=/opt/tcl8.7/lib
-        make dist PKG_DIR=/tmp/distcheck
+        make dist PKG_DIR=distcheck
 
     - name: Run tests
       run: |
