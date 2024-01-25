@@ -40,11 +40,11 @@ jobs:
       run: |
         autoconf
         ./configure --with-tcl=/opt/tcl8.7/lib
-        make dist DIST_DIR=/tmp/distcheck
+        make dist PKG_DIR=/tmp/distcheck
 
     - name: Run tests
       run: |
-        cd /tmp/distcheck
+        cd /tmp/dist/distcheck
         ./configure --with-tcl=/opt/tcl8.7/lib --enable-testmode
         make test 2>&1 | tee /tmp/test_results.log
 
@@ -70,7 +70,7 @@ jobs:
         draft: false
         prerelease: true
         files: |
-          /tmp/dist/s2n*.tar.gz
+          /tmp/dist/tcl-s2n-*.tar.gz
 
 #    - name: debug
 #      if: ${{ failure() }}

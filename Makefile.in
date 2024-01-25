@@ -78,7 +78,7 @@ mandir		= @mandir@
 
 DESTDIR		=
 
-PKG_DIR		= $(PACKAGE_NAME)$(PACKAGE_VERSION)
+PKG_DIR		= tcl-$(PACKAGE_NAME)-$(PACKAGE_VERSION)
 pkgdatadir	= $(datadir)/$(PKG_DIR)
 pkglibdir	= $(libdir)/$(PKG_DIR)
 pkgincludedir	= $(includedir)/$(PKG_DIR)
@@ -346,6 +346,7 @@ dist-clean: deps-clean
 	rm -rf $(DIST_DIR) $(DIST_ROOT)/$(PKG_DIR).tar.*
 
 dist: dist-clean
+	$(INSTALL_DATA_DIR) $(DIST_ROOT)
 	$(INSTALL_DATA_DIR) $(DIST_DIR)
 
 	# TEA files
