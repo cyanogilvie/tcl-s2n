@@ -39,11 +39,14 @@ jobs:
     - name: Build tcl-s2n
       run: |
         autoconf
-        ./configure --with-tcl=/opt/tcl8.7/lib --enable-testmode
-        make
+        ./configure
+        make dist DIST_DIR=/tmp/distcheck
 
     - name: Run tests
-      run: make test 2>&1 | tee /tmp/test_results.log
+      run: |
+        cd /tmp/distcheck
+        ./configure --with-tcl=/opt/tcl8.7/lib --enable-testmode
+        make test 2>&1 | tee /tmp/test_results.log
 
     - name: Upload test results
       uses: actions/upload-artifact@v3

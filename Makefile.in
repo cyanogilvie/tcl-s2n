@@ -490,9 +490,11 @@ uninstall-binaries:
 	  rm -f $(DESTDIR)$(bindir)/$$p; \
 	done
 
-deps: local/lib/libs2n.a local/lib/libclogs.a
+deps: local/lib/libs2n.a local/lib/libclogs.a deps-aio
 
 local/lib/libs2n.a:
+	#mkdir -p $(top_builddir)/local/lib
+	#ln -s $(top_builddir)/local/lib $(top_builddir)/local/lib64
 	cd $(srcdir)/deps/aws-lc && \
 		cmake -B $(top_builddir)/build/aws-lc \
 			-DCMAKE_BUILD_TYPE=$(S2N_BUILD_MODE) \
@@ -501,15 +503,17 @@ local/lib/libs2n.a:
 			-DBUILD_TOOL=OFF \
 			-DDISABLE_PERL=ON \
 			-DDISABLE_GO=ON \
-			-DCMAKE_INSTALL_LIBDIR=$(top_builddir)/local/lib64 \
+			-DCMAKE_INSTALL_LIBDIR=$(top_builddir)/local/lib \
 			-DCMAKE_INSTALL_INCLUDEDIR=$(top_builddir)/local/include \
-			-DCMAKE_INSTALL_BINDIR=$(top_builddir)/local/bin
-	make -j 8 -C build/aws-lc install
-	#make -C deps/s2n-tls prefix=$(top_builddir)/local LIBCRYPTO_ROOT=$(top_builddir)/local install
+			-DCMAKE_INSTALL_BINDIR=$(top_builddir)/local/bin && \
+		cmake --build $(top_builddir)/build/aws-lc -j 8 && \
+		cmake --install $(top_builddir)/build/aws-lc
+	sed --in-place -e "s%_IMPORT_PREFIX \"/usr/local\"%_IMPORT_PREFIX \"$(top_builddir)/local\"%" $(top_builddir)/local/lib/crypto/cmake/static/crypto-targets.cmake   # TODO: figure out how to do this in correctly
 	cd $(srcdir)/deps/s2n-tls && \
 		cmake . -B $(top_builddir)/build/s2n-tls \
 			-DSEARCH_LIBCRYPTO=OFF \
 			-DS2N_INTERN_LIBCRYPTO=ON \
+			-DS2N_LTO=OFF \
 			-DBUILD_TESTING=OFF \
 			-DCMAKE_BUILD_TYPE=$(S2N_BUILD_MODE) \
 			-DCMAKE_PREFIX_PATH=$(top_builddir)/local \
@@ -520,8 +524,11 @@ local/lib/libs2n.a:
 local/lib/libclogs.a: deps/clogs/*.c deps/clogs/*.h deps/clogs/*.def deps/clogs/Makefile
 	make -C deps/clogs clean install DESTDIR=$(top_builddir) PREFIX=/local
 
+deps-aio: deps/aio/aio.tcl deps/aio/Makefile
+	make -C deps/aio clean install DESTDIR=$(top_builddir) PREFIX=/local
+
 .PHONY: all binaries clean depend distclean doc install libraries test
-.PHONY: gdb gdb-test valgrind valgrindshell deps deps-clean
+.PHONY: gdb gdb-test valgrind valgrindshell deps deps-clean deps-aio
 
 include $(top_builddir)/Makefile.teabase
 

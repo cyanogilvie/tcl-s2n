@@ -16,3 +16,6 @@
 [submodule "deps/clogs"]
 	path = deps/clogs
 	url = https://github.com/cyanogilvie/clogs
+[submodule "deps/aio"]
+	path = deps/aio
+	url = https://github.com/cyanogilvie/aio

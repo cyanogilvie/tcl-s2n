@@ -6,4 +6,5 @@ if {"::tcltest" ni [namespace children]} {
 ::tcltest::loadTestedCommands
 package require s2n
 
+tcl::tm::path add [file join [file dirname [info script]] ../local/lib/tcl8/site-tcl]
 
