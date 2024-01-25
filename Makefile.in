@@ -390,6 +390,7 @@ dist: dist-clean
 	done
 
 	$(DIST_INSTALL_ASIS) $(srcdir)/deps $(DIST_DIR)/deps/
+	$(TCLSH) $(srcdir)/tools/trimdist.tcl $(DIST_DIR)
 
 	(cd $(DIST_ROOT); $(COMPRESS);)
 
@@ -503,10 +504,13 @@ local/lib/libs2n.a:
 			-DCMAKE_INSTALL_LIBDIR=$(top_builddir)/local/lib64 \
 			-DCMAKE_INSTALL_INCLUDEDIR=$(top_builddir)/local/include \
 			-DCMAKE_INSTALL_BINDIR=$(top_builddir)/local/bin
-	make -C build/aws-lc install
+	make -j 8 -C build/aws-lc install
 	#make -C deps/s2n-tls prefix=$(top_builddir)/local LIBCRYPTO_ROOT=$(top_builddir)/local install
 	cd $(srcdir)/deps/s2n-tls && \
 		cmake . -B $(top_builddir)/build/s2n-tls \
+			-DSEARCH_LIBCRYPTO=OFF \
+			-DS2N_INTERN_LIBCRYPTO=ON \
+			-DBUILD_TESTING=OFF \
 			-DCMAKE_BUILD_TYPE=$(S2N_BUILD_MODE) \
 			-DCMAKE_PREFIX_PATH=$(top_builddir)/local \
 			-DCMAKE_INSTALL_PREFIX=$(top_builddir)/local && \

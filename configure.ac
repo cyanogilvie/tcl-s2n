@@ -79,7 +79,7 @@ ENABLE_TESTMODE
 TEA_ADD_SOURCES([s2n.c])
 TEA_ADD_HEADERS([])
 TEA_ADD_INCLUDES([-Ilocal/include])
-TEA_ADD_LIBS([-Llocal/lib -Llocal/lib64 -l:libs2n.a -l:libcrypto.a -l:libclogs.a])
+TEA_ADD_LIBS([-Llocal/lib -l:libs2n.a -l:libclogs.a])
 TEA_ADD_CFLAGS([-std=c11 -Wall -Werror -Wextra -Wno-unused-parameter -Wno-override-init])
 TEA_ADD_STUB_SOURCES([])
 TEA_ADD_TCL_SOURCES([])
