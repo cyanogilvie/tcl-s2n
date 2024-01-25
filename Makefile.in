@@ -523,7 +523,7 @@ local/lib/libs2n.a:
 		cmake --install $(top_builddir)/build/s2n-tls
 
 local/lib/libclogs.a: deps/clogs/*.c deps/clogs/*.h deps/clogs/*.def deps/clogs/Makefile
-	make -C deps/clogs clean install DESTDIR=$(top_builddir) PREFIX=/local
+	make -C deps/clogs clean install CFLAGS_OPTIMIZE="$(CFLAGS)" DESTDIR=$(top_builddir) PREFIX=/local
 
 deps-aio: deps/aio/aio.tcl deps/aio/Makefile
 	make -C deps/aio clean install DESTDIR=$(top_builddir) PREFIX=/local
