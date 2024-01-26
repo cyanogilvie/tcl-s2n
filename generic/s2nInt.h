@@ -21,10 +21,17 @@
 #define DBG_LIFECYCLE 0
 #endif
 
-#undef CLOGS_DBG_PREFIX_FMT
-#undef CLOGS_DBG_PREFIX_ARGS
-#define CLOGS_DBG_PREFIX_FMT	"[%14.9f %10.3f %s:%d:%s] "
-#define CLOGS_DBG_PREFIX_ARGS	, clogs_proctime(), clogs_delta_usec(),  __FILE__, __LINE__, clogs_cstr(__func__, CLOGS_GREENISH)
+#ifndef DBG_WATCH
+#define DBG_WATCH 0
+#endif
+
+#undef CLOGS_DBG_PREFIX_FMT_DEFAULT
+#undef CLOGS_DBG_PREFIX_ARGS_DEFAULT
+#define CLOGS_DBG_PREFIX_FMT_DEFAULT	"[%14.9f %10.3f %s:%d:%s] "
+#define CLOGS_DBG_PREFIX_ARGS_DEFAULT	, clogs_proctime(), clogs_delta_usec(),  __FILE__, __LINE__, clogs_cstr(__func__, CLOGS_GREENISH)
+#include <clogs_reset_dbg_prefix.def>
+
+#define S2N_CON_NAME(_c)  clogs_name(_c, CLOGS_PURPLEISH)
 
 #define CHECK_S2N(label, var, cmd) \
 	if ((cmd) != S2N_SUCCESS) { \
@@ -56,8 +63,16 @@ struct interp_cx {
 	Tcl_Obj*	lit[L_size];
 };
 
+enum chantype {
+	CHANTYPE_STACKED,
+	CHANTYPE_DIRECT,
+};
+
 struct con_cx {
 	struct s2n_connection*	s2n_con;
+	enum chantype			type;
+	Tcl_Interp*				interp;
+	Tcl_Channel				chan;
 	Tcl_Channel				basechan;
 	s2n_blocked_status		blocked;
 	int						handshake_done;

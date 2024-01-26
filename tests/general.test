@@ -1,0 +1,14 @@
+source [file join [file dirname [info script]] common.tcl]
+
+tcltest::testConstraint have_aio [expr {![catch {package require aio}]}]
+
+test general-2.1 {openssl_version} -body { #<<<
+	s2n::openssl_version
+} -result 1.1.1.15
+#>>>
+
+# cleanup
+::tcltest::cleanupTests
+return
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4

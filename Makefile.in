@@ -534,7 +534,7 @@ deps-aio: deps/aio/aio.tcl deps/aio/Makefile
 include $(top_builddir)/Makefile.teabase
 
 alltags:
-	ctags-exuberant -R generic/* deps/s2n-tls/tls deps/s2n-tls/api deps/aws-lc/crypto $(TCL_SRC_DIR)
+	ctags-exuberant -R generic/* deps/s2n-tls/tls deps/s2n-tls/api deps/aws-lc/crypto deps/clogs/*.c deps/clogs/*.h $(TCL_SRC_DIR)
 
 .PHONY: alltags
 

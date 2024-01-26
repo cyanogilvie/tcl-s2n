@@ -2,7 +2,7 @@ source [file join [file dirname [info script]] common.tcl]
 
 tcltest::testConstraint have_aio [expr {![catch {package require aio}]}]
 
-test basic-1.1 {Negotiate as a client with www.google.com, blocking basechan} -body { #<<<
+test push-1.1 {Negotiate as a client with www.google.com, blocking basechan} -body { #<<<
 	set chans_before	[lsort [chan names]]
 	set sock	[socket www.google.com 443]
 	s2n::push $sock -servername www.google.com -role client
@@ -15,7 +15,7 @@ test basic-1.1 {Negotiate as a client with www.google.com, blocking basechan} -b
 	unset -nocomplain sock
 } -match glob -result {HTTP/1.1 200 *}
 #>>>
-test basic-1.2 {Negotiate as a client with www.google.com, non-blocking basechan} -constraints have_aio -body { #<<<
+test push-1.2 {Negotiate as a client with www.google.com, non-blocking basechan} -constraints have_aio -body { #<<<
 	set sock	[socket -async www.google.com 443]
 	#puts stderr "waiting for writable"
 	#aio waitfor writable $sock
@@ -35,11 +35,40 @@ test basic-1.2 {Negotiate as a client with www.google.com, non-blocking basechan
 	unset -nocomplain sock rx
 } -match glob -result {HTTP/1.1 200 *}
 #>>>
-test basic-2.1 {openssl_version} -body { #<<<
-	s2n::openssl_version
-} -result 1.1.1.15
+test push-3.1 {abandon connection, blocking, complete} -setup { #<<<
+	set child	[interp create]
+	$child eval {load {} S2n}
+} -body {
+	$child eval {
+		set sock	[socket www.google.com 443]
+		s2n::push $sock -servername www.google.com -role client
+		chan configure $sock -buffering none -translation crlf -encoding ascii
+		puts -nonewline $sock "GET / HTTP/1.1\nHost: www.google.com\nUser-Agent: TLS test\nContent-Length: 0\n\n"
+		set status_line	[gets $sock]
+		puts stderr "status_line: ($status_line)"
+		list [expr {$sock in [chan names]}] [string match {HTTP/1.1 200 *} $status_line]
+	}
+} -cleanup {
+	interp delete $child
+	unset -nocomplain child status_line
+} -result {1 1}
 #>>>
-
+test push-3.2 {abandon connection, nonblocking, in progress} -setup { #<<<
+	set child	[interp create]
+	$child eval {load {} S2n}
+} -body {
+	$child eval {
+		set sock	[socket -async www.google.com 443]
+		chan configure $sock -blocking 0
+		s2n::push $sock -servername www.google.com -role client
+		chan configure $sock -buffering none -translation crlf -encoding ascii
+		puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	}
+} -cleanup {
+	interp delete $child
+	unset -nocomplain child
+} -result {}
+#>>>
 
 # cleanup
 ::tcltest::cleanupTests

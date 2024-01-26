@@ -4,9 +4,10 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.3?
+**package require s2n** ?0.3.5?
 
-**s2n::push** *channelName* ?*-opt* *val* …?
+**s2n::push** *channelName* ?*-opt* *val* …?  
+**s2n::socket** ?*-opt* *val* …? *host* *port*
 
 ## DESCRIPTION
 
@@ -25,6 +26,12 @@ for the libcrypto implementation.
     be a socket created with **-async** and still be waiting for the
     connection to complete.
 
+  - **s2n::socket** ?*-opt* *val* …? *host* *port*  
+    Open a TCP connection to *host*:*port* and handshake with that host
+    as a TLS client. See **OPTIONS** for the available options. If
+    *host* is not a numeric address (IPv4 or IPv6) then it supplies the
+    default for the **-servername** option.
+
 ## OPTIONS
 
   - **-config** *config*  
@@ -35,7 +42,8 @@ for the libcrypto implementation.
     Set the role the TLS driver will play in the TLS handshake. If
     **client** (the default) the driver will initiate a TLS handshake
     otherwise it will wait to receive a ClientHello TLS message and
-    handshake as a server.
+    handshake as a server. Only valid as an option to the **s2n::push**
+    command, sockets opened using **s2n::socket** area always clients.
 
   - **-servername** *host*  
     Set the SNI (Server Name Indication) name to send when handshaking
@@ -100,13 +108,13 @@ support 8.6.
 ### From a Release Tarball
 
 Download and extract [the
-release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3/s2n0.3.tar.gz),
+release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz),
 then build in the standard TEA way:
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3/s2n0.3.tar.gz
-tar xf s2n0.3.tar.gz
-cd s2n0.3
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz
+tar xf tcl-s2n-0.3.5.tar.gz
+cd tcl-s2n-0.3.5
 ./configure
 make
 sudo make install
@@ -134,7 +142,7 @@ and strip debug symbols, minimising image size:
 
 ``` dockerfile
 WORKDIR /tmp/tcl-s2n
-RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3/s2n0.3.tar.gz -O - | tar xz --strip-components=1 && \
+RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz -O - | tar xz --strip-components=1 && \
     ./configure; make test install-binaries install-libraries && \
     strip /usr/local/lib/libs2n*.so && \
     cd .. && rm -rf tcl-s2n

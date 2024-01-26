@@ -9,6 +9,7 @@ static const char* lit_str[L_size] = {
 
 TCL_DECLARE_MUTEX(g_init_mutex);
 static int				g_init = 0;
+static Tcl_HashTable	g_managed_chans;
 
 TCL_DECLARE_MUTEX(g_intreps_mutex);
 static Tcl_HashTable	g_intreps;
@@ -22,18 +23,20 @@ static int s2n_chan_set_option(ClientData cdata, Tcl_Interp* interp, const char*
 static int s2n_chan_get_option(ClientData cdata, Tcl_Interp* interp, const char* optname, Tcl_DString* dsPtr);
 static void s2n_chan_watch(ClientData cdata, int mask);
 static int s2n_chan_handler(ClientData cdata, int mask);
+static void s2n_chan_thread_action(ClientData cdata, int action);
 
 Tcl_ChannelType	s2n_channel_type = {
-	.typeName		= "s2n",
-	.version		= TCL_CHANNEL_VERSION_5,
-	.blockModeProc	= s2n_chan_block_mode,
-	.close2Proc		= s2n_chan_close2,
-	.inputProc		= s2n_chan_input,
-	.outputProc		= s2n_chan_output,
-	.setOptionProc	= s2n_chan_set_option,
-	.getOptionProc	= s2n_chan_get_option,
-	.watchProc		= s2n_chan_watch,
-	.handlerProc	= s2n_chan_handler,
+	.typeName			= "s2n_stacked",
+	.version			= TCL_CHANNEL_VERSION_5,
+	.blockModeProc		= s2n_chan_block_mode,
+	.close2Proc			= s2n_chan_close2,
+	.inputProc			= s2n_chan_input,
+	.outputProc			= s2n_chan_output,
+	.setOptionProc		= s2n_chan_set_option,
+	.getOptionProc		= s2n_chan_get_option,
+	.watchProc			= s2n_chan_watch,
+	.handlerProc		= s2n_chan_handler,
+	.threadActionProc	= s2n_chan_thread_action,
 };
 
 static int s2n_chan_block_mode(ClientData cdata, int mode) //<<<
@@ -90,12 +93,13 @@ static int s2n_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags) //<<
 		}
 
 	} else if (flags == 0) {
+		CLOGS(LIFECYCLE, "closing connection %s", S2N_CON_NAME(con_cx->s2n_con));
 		if (con_cx->write_closed) {
 			free_con_cx(con_cx);
 			con_cx = NULL;
 		} else {
 			s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-			CLOGS(IO, "calling s2n_shutdown");
+			CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
 			const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
 			// TODO: Handle blocked?
 			if (rc == S2N_SUCCESS) {
@@ -342,17 +346,20 @@ static const char* mask_str(int mask) //<<<
 static void s2n_chan_watch(ClientData cdata, int mask) //<<<
 {
 	struct con_cx*	con_cx = cdata;
+	const int gotmask = mask;
 
 	if (!con_cx->handshake_done) {
 		// While the handshake is busy, signal that we want to be notified when IO is possible
-		mask = 0;
+		mask &= TCL_EXCEPTION;
 		switch (con_cx->blocked) {
 			case S2N_BLOCKED_ON_READ:	mask |= TCL_READABLE; break;
 			case S2N_BLOCKED_ON_WRITE:	mask |= TCL_WRITABLE; break;
 			default: break;
 		}
+		CLOGS(HANDSHAKE, "handshake not done, forwarding mask: %s", mask_str(mask));
 	}
 
+	CLOGS(WATCH, "gotmask %s, forwarding %s", mask_str(gotmask), mask_str(mask));
 	Tcl_DriverWatchProc*	base_watch = Tcl_ChannelWatchProc(Tcl_GetChannelType(con_cx->basechan));
 	return base_watch(Tcl_GetChannelInstanceData(con_cx->basechan), mask);
 }
@@ -410,14 +417,34 @@ static int s2n_chan_handler(ClientData cdata, int mask) //<<<
 }
 
 //>>>
+static const char* action_str(int action) //<<<
+{
+	switch (action) {
+		case TCL_CHANNEL_THREAD_INSERT:		return "TCL_CHANNEL_THREAD_INSERT";
+		case TCL_CHANNEL_THREAD_REMOVE:		return "TCL_CHANNEL_THREAD_REMOVE";
+		default:							return "<unknown>";
+	}
+}
+
+//>>>
+static void s2n_chan_thread_action(ClientData cdata, int action) //<<<
+{
+	struct con_cx*	con_cx = cdata;
+	CLOGS(LIFECYCLE, "%s: %s", S2N_CON_NAME(con_cx->s2n_con), action_str(action));
+	Tcl_DriverThreadActionProc*	base_thread_action = Tcl_ChannelThreadActionProc(Tcl_GetChannelType(con_cx->basechan));
+	if (base_thread_action)
+		base_thread_action(Tcl_GetChannelInstanceData(con_cx->basechan), action);
+}
+
+//>>>
 
 // Internal API <<<
 void free_interp_cx(ClientData cdata, Tcl_Interp* interp) //<<<
 {
 	struct interp_cx*	l = (struct interp_cx*)cdata;
 
+	CLOGS(LIFECYCLE, "free_interp_cx");
 	for (int i=0; i<L_size; i++) replace_tclobj(&l->lit[i], NULL);
-
 	ckfree(l);
 }
 
@@ -447,6 +474,33 @@ void forget_intrep(Tcl_Obj* obj) //<<<
 }
 
 //>>>
+static void register_chan(struct con_cx* con_cx) //<<<
+{
+	Tcl_HashEntry*		he = NULL;
+	int					new = 0;
+
+	CLOGS(LIFECYCLE, "registering chan %s", clogs_name(con_cx));
+	Tcl_MutexLock(&g_init_mutex);
+	he = Tcl_CreateHashEntry(&g_managed_chans, con_cx, &new);
+	if (!new) Tcl_Panic("register_chan: already registered");
+	Tcl_SetHashValue(he, con_cx);
+	Tcl_MutexUnlock(&g_init_mutex);
+}
+
+//>>>
+static void forget_chan(struct con_cx* con_cx) //<<<
+{
+	Tcl_HashEntry*		he = NULL;
+
+	CLOGS(LIFECYCLE, "forgetting chan %s", clogs_name(con_cx));
+	Tcl_MutexLock(&g_init_mutex);
+	he = Tcl_FindHashEntry(&g_managed_chans, con_cx);
+	if (!he) Tcl_Panic("forget_chan: not registered");
+	Tcl_DeleteHashEntry(he);
+	Tcl_MutexUnlock(&g_init_mutex);
+}
+
+//>>>
 
 static void free_s2n_config_intrep(Tcl_Obj* obj);
 static void dup_s2n_config_intrep(Tcl_Obj* src, Tcl_Obj* dst);
@@ -461,6 +515,7 @@ static void free_s2n_config_intrep(Tcl_Obj* obj) //<<<
 {
 	struct s2n_config*	config = NULL;
 
+	CLOGS(LIFECYCLE, "freeing config %s", clogs_name(obj));
 	forget_intrep(obj);
 	Tcl_ObjInternalRep*	ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
 	if (ir) {
@@ -550,6 +605,7 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 		c = NULL;		// Hand ownership to the intrep
 		register_intrep(obj);
 		ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
+		CLOGS(LIFECYCLE, "created config %s", clogs_name(obj));
 	}
 
 	*config = (struct s2n_config*)ir->twoPtrValue.ptr1;
@@ -573,9 +629,10 @@ finally:
 //>>>
 void free_con_cx(struct con_cx* con_cx) //<<<
 {
-	CLOGS(LIFECYCLE, "free_con_cx");
+	CLOGS(LIFECYCLE, "free_con_cx: %s", clogs_name(con_cx));
+	forget_chan(con_cx);
 	if (con_cx->s2n_con) {
-		CLOGS(LIFECYCLE, "Freeing s2n connection");
+		CLOGS(LIFECYCLE, "Freeing s2n connection: %s", S2N_CON_NAME(con_cx->s2n_con));
 		if (-1 == s2n_connection_free(con_cx->s2n_con)) {
 			Tcl_Panic("s2n_connection_free failed: %s\n", s2n_strerror(s2n_errno, "EN"));
 		}
@@ -641,9 +698,11 @@ OBJCMD(push_cmd) //<<<
 
 	con_cx = (struct con_cx*)ckalloc(sizeof *con_cx);
 	*con_cx = (struct con_cx){
+		.type		= CHANTYPE_STACKED,
 		.basechan	= basechan,
 		.blocked	= S2N_NOT_BLOCKED,
 	};
+	CLOGS(LIFECYCLE, "Created con_cx: %s", clogs_name(con_cx));
 
 	// Need to scan the options first to get the role
 	for (i=A_args; i<objc; i++) {
@@ -667,6 +726,7 @@ OBJCMD(push_cmd) //<<<
 	}
 
 	con_cx->s2n_con = s2n_connection_new(role == ROLE_CLIENT ? S2N_CLIENT : S2N_SERVER);
+	CLOGS(LIFECYCLE, "Created s2n connection: %s", S2N_CON_NAME(con_cx->s2n_con));
 
 	for (i=A_args; i<objc; i++) {
 		int			optint;
@@ -745,18 +805,19 @@ OBJCMD(push_cmd) //<<<
 		}
 	}
 
-	Tcl_Channel tlschan = Tcl_StackChannel(interp, &s2n_channel_type, con_cx, TCL_READABLE | TCL_WRITABLE, basechan);
+	con_cx->chan = Tcl_StackChannel(interp, &s2n_channel_type, con_cx, TCL_READABLE | TCL_WRITABLE, basechan);
+	register_chan(con_cx);
 	CLOGS(HANDSHAKE, "leaving push_cmd, handshake_done: %d", con_cx->handshake_done);
 	con_cx = NULL;	// Hand ownershop to the s2n_channel_type driver
 	stacked = 1;
 
 finally:
+	if (code != TCL_OK && stacked && con_cx) {
+		code = Tcl_UnstackChannel(interp, con_cx->chan);
+	}
 	if (con_cx) {
 		free_con_cx(con_cx);
 		con_cx = NULL;
-	}
-	if (code != TCL_OK && stacked) {
-		code = Tcl_UnstackChannel(interp, tlschan);
 	}
 	return code;
 }
@@ -805,10 +866,12 @@ DLLEXPORT int S2n_Init(Tcl_Interp* interp) //<<<
 #if USE_TCL_STUBS
 	if (Tcl_InitStubs(interp, TCL_VERSION, 0) == NULL) return TCL_ERROR;
 #endif
-
+	CLOGS(LIFECYCLE, "loading into interp %s", clogs_name(interp));
 
 	Tcl_MutexLock(&g_init_mutex);
 	if (!g_init) {
+		CLOGS(LIFECYCLE, "calling s2n_init");
+		Tcl_InitHashTable(&g_managed_chans, TCL_ONE_WORD_KEYS);
 		if (-1 == s2n_init()) {
 			code = TCL_ERROR;
 			Tcl_SetErrorCode(interp, "S2N", s2n_strerror_name(s2n_errno), NULL);
@@ -877,10 +940,21 @@ DLLEXPORT int S2n_SafeInit(Tcl_Interp* interp) //<<<
 //>>>
 #endif
 #if UNLOAD
+const char* unload_flags_str(int flags) //<<<
+{
+	switch (flags) {
+		case TCL_UNLOAD_DETACH_FROM_INTERPRETER:	return "TCL_UNLOAD_DETACH_FROM_INTERPRETER";
+		case TCL_UNLOAD_DETACH_FROM_PROCESS:		return "TCL_UNLOAD_DETACH_FROM_PROCESS";
+		default:									return "unknown";
+	}
+}
+
+//>>>
 DLLEXPORT int S2n_Unload(Tcl_Interp* interp, int flags) //<<<
 {
 	int			code = TCL_OK;
 
+	CLOGS(LIFECYCLE, "--> unloading from %s: flags: %s", clogs_name(interp), unload_flags_str(flags));
 	Tcl_DeleteAssocData(interp, PACKAGE_NAME);	// Have to do this here, otherwise Tcl will try to call it after we're unloaded
 
 	if (flags == TCL_UNLOAD_DETACH_FROM_PROCESS) {
@@ -888,6 +962,7 @@ DLLEXPORT int S2n_Unload(Tcl_Interp* interp, int flags) //<<<
 		if (g_intreps_init) {
 			Tcl_HashEntry*	he;
 			Tcl_HashSearch	search;
+			CLOGS(LIFECYCLE, "converting intreps to pure strings");
 			while ((he = Tcl_FirstHashEntry(&g_intreps, &search))) {
 				Tcl_Obj*	obj = (Tcl_Obj*)Tcl_GetHashValue(he);
 				Tcl_GetString(obj);
@@ -902,6 +977,22 @@ DLLEXPORT int S2n_Unload(Tcl_Interp* interp, int flags) //<<<
 
 		Tcl_MutexLock(&g_init_mutex);
 		if (g_init) {
+			Tcl_HashEntry*	he;
+			Tcl_HashSearch	search;
+			CLOGS(LIFECYCLE, "closing managed channels");
+			while ((he = Tcl_FirstHashEntry(&g_managed_chans, &search))) {
+				struct con_cx*	con_cx = (struct con_cx*)Tcl_GetHashValue(he);
+				if (con_cx->type == CHANTYPE_STACKED) {
+					CLOGS(LIFECYCLE, "unstacking stacked channel: %s", clogs_name(con_cx));
+					Tcl_UnstackChannel(interp, con_cx->basechan);
+				} else {
+					CLOGS(LIFECYCLE, "closing channel: %s", clogs_name(con_cx));
+					Tcl_Close(interp, con_cx->chan);
+				}
+			}
+			Tcl_DeleteHashTable(&g_managed_chans);
+
+			CLOGS(LIFECYCLE, "calling s2n_cleanup");
 			if (-1 == s2n_cleanup())
 				Tcl_Panic("s2n_cleanup failed: %s\n", s2n_strerror(s2n_errno, "EN"));
 			g_init = 0;
@@ -911,6 +1002,7 @@ DLLEXPORT int S2n_Unload(Tcl_Interp* interp, int flags) //<<<
 		g_init_mutex = NULL;
 	}
 
+	CLOGS(LIFECYCLE, "<-- unloading");
 	return code;
 }
 

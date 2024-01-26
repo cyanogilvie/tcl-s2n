@@ -5,7 +5,7 @@
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <meta name="author" content="Cyan Ogilvie" />
-  <title>s2n(3) 0.3 | s2n Tcl wrapper</title>
+  <title>s2n(3) 0.3.5 | s2n Tcl wrapper</title>
   <style>
     code{white-space: pre-wrap;}
     span.smallcaps{font-variant: small-caps;}
@@ -96,20 +96,24 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">s2n(3) 0.3 | s2n Tcl wrapper</h1>
+<h1 class="title">s2n(3) 0.3.5 | s2n Tcl wrapper</h1>
 <p class="author">Cyan Ogilvie</p>
 </header>
 <h1 id="s2n">S2N</h1>
 <p>s2n Tcl wrapper - layer TLS onto Tcl channels</p>
 <h2 id="synopsis">SYNOPSIS</h2>
-<p><strong>package require s2n</strong> ?0.3?</p>
-<p><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?</p>
+<p><strong>package require s2n</strong> ?0.3.5?</p>
+<p><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?<br />
+<strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …? <em>host</em> <em>port</em></p>
 <h2 id="description">DESCRIPTION</h2>
 <p>This package provides a channel driver that can be stacked on any Tcl channel that supports reading and writing to add TLS support. The TLS implementation uses Amazon’s s2n for the TLS implementation and aws-lc for the libcrypto implementation.</p>
 <h2 id="commands">COMMANDS</h2>
 <dl>
 <dt><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?</dt>
 <dd><p>Stack a TLS protocol driver onto the channel <em>channelName</em>. See <strong>OPTIONS</strong> for the allowed options. The TLS protocol driver may be removed with the standard <strong>chan pop</strong> <em>channelName</em> Tcl command. The <em>channelName</em> channel may be blocking or non-blocking, and may be a socket created with <strong>-async</strong> and still be waiting for the connection to complete.</p>
+</dd>
+<dt><strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …? <em>host</em> <em>port</em></dt>
+<dd><p>Open a TCP connection to <em>host</em>:<em>port</em> and handshake with that host as a TLS client. See <strong>OPTIONS</strong> for the available options. If <em>host</em> is not a numeric address (IPv4 or IPv6) then it supplies the default for the <strong>-servername</strong> option.</p>
 </dd>
 </dl>
 <h2 id="options">OPTIONS</h2>
@@ -118,7 +122,7 @@
 <dd><p>Override the default configuration for the channel, see <strong>CONFIG</strong> for details.</p>
 </dd>
 <dt><strong>-role</strong> <strong>client</strong>|<strong>server</strong></dt>
-<dd><p>Set the role the TLS driver will play in the TLS handshake. If <strong>client</strong> (the default) the driver will initiate a TLS handshake otherwise it will wait to receive a ClientHello TLS message and handshake as a server.</p>
+<dd><p>Set the role the TLS driver will play in the TLS handshake. If <strong>client</strong> (the default) the driver will initiate a TLS handshake otherwise it will wait to receive a ClientHello TLS message and handshake as a server. Only valid as an option to the <strong>s2n::push</strong> command, sockets opened using <strong>s2n::socket</strong> area always clients.</p>
 </dd>
 <dt><strong>-servername</strong> <em>host</em></dt>
 <dd><p>Set the SNI (Server Name Indication) name to send when handshaking as a client. There is no default, if not present, the SNI extension won’t be used. It’s also an error to set this option for server connections.</p>
@@ -152,10 +156,10 @@
 <p>This package has no external dependencies other than Tcl. The s2n and aws-lc libraries it depends on are included as submodules (or baked into the release tarball) and are built and statically linked as part of the package build process.</p>
 <p>Currently Tcl 8.7 is required, but if needed polyfills could be built to support 8.6.</p>
 <h3 id="from-a-release-tarball">From a Release Tarball</h3>
-<p>Download and extract <a href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3/s2n0.3.tar.gz">the release</a>, then build in the standard TEA way:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3/s2n0.3.tar.gz</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a><span class="fu">tar</span> xf s2n0.3.tar.gz</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true"></a><span class="bu">cd</span> s2n0.3</span>
+<p>Download and extract <a href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz">the release</a>, then build in the standard TEA way:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a><span class="fu">tar</span> xf tcl-s2n-0.3.5.tar.gz</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true"></a><span class="bu">cd</span> tcl-s2n-0.3.5</span>
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true"></a><span class="ex">./configure</span></span>
 <span id="cb2-5"><a href="#cb2-5" aria-hidden="true"></a><span class="fu">make</span></span>
 <span id="cb2-6"><a href="#cb2-6" aria-hidden="true"></a><span class="fu">sudo</span> make install</span></code></pre></div>
@@ -170,7 +174,7 @@
 <h3 id="in-a-docker-build">In a Docker Build</h3>
 <p>Build from a specified release version, avoiding layer pollution and only adding the installed package without documentation to the image, and strip debug symbols, minimising image size:</p>
 <div class="sourceCode" id="cb4"><pre class="sourceCode dockerfile"><code class="sourceCode dockerfile"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="kw">WORKDIR</span> /tmp/tcl-s2n</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="kw">RUN</span> wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3/s2n0.3.tar.gz -O - | tar xz --strip-components=1 &amp;&amp; \</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="kw">RUN</span> wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz -O - | tar xz --strip-components=1 &amp;&amp; \</span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true"></a>    ./configure; make test install-binaries install-libraries &amp;&amp; \</span>
 <span id="cb4-4"><a href="#cb4-4" aria-hidden="true"></a>    strip /usr/local/lib/libs2n*.so &amp;&amp; \</span>
 <span id="cb4-5"><a href="#cb4-5" aria-hidden="true"></a>    cd .. &amp;&amp; rm -rf tcl-s2n</span></code></pre></div>

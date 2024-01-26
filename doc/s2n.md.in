@@ -10,7 +10,8 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 **package require @PACKAGE_NAME@** ?@PACKAGE_VERSION@?
 
-**@PACKAGE_NAME@::push** *channelName* ?*-opt* *val* ...?
+**@PACKAGE_NAME@::push** *channelName* ?*-opt* *val* ...?\
+**@PACKAGE_NAME@::socket** ?*-opt* *val* ...? *host* *port*
 
 
 ## DESCRIPTION
@@ -33,6 +34,13 @@ implementation.
     to complete.
 
 
+**@PACKAGE_NAME@::socket** ?*-opt* *val* ...? *host* *port*
+
+:   Open a TCP connection to *host*:*port* and handshake with that host as a TLS client.
+    See **OPTIONS** for the available options.  If *host* is not a numeric address (IPv4
+    or IPv6) then it supplies the default for the **-servername** option.
+
+
 ## OPTIONS
 
 **-config** *config*
@@ -43,7 +51,8 @@ implementation.
 
 :   Set the role the TLS driver will play in the TLS handshake.  If **client** (the default)
     the driver will initiate a TLS handshake otherwise it will wait to receive a ClientHello
-    TLS message and handshake as a server.
+    TLS message and handshake as a server.  Only valid as an option to the **s2n::push** command,
+    sockets opened using **s2n::socket** area always clients.
 
 **-servername** *host*
 
