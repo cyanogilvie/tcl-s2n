@@ -1,11 +1,20 @@
 #ifndef _S2NINT_H
 #define _S2NINT_H
+#define _POSIX_C_SOURCE 200112L		// maybe _GNU_SOURCE?
 #include "tclstuff.h"
 #include <s2n.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include "tip445.h"
 #include "clogs.h"
 
@@ -71,10 +80,18 @@ enum chantype {
 struct con_cx {
 	struct s2n_connection*	s2n_con;
 	enum chantype			type;
-	Tcl_Interp*				interp;
 	Tcl_Channel				chan;
 	Tcl_Channel				basechan;
 	s2n_blocked_status		blocked;
+
+	// For direct channels
+	int						fd;
+	int						blocking;
+	int						connected;
+
+	size_t					write_count;	// Number of plaintext bytes written
+	size_t					read_count;		// Number of plaintext bytes read
+
 	int						handshake_done;
 	int						read_closed;
 	int						write_closed;

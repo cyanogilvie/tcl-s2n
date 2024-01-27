@@ -30,7 +30,9 @@ for the libcrypto implementation.
     Open a TCP connection to *host*:*port* and handshake with that host
     as a TLS client. See **OPTIONS** for the available options. If
     *host* is not a numeric address (IPv4 or IPv6) then it supplies the
-    default for the **-servername** option.
+    default for the **-servername** option. If *host* is given as an
+    empty string, then *port* is taken to be a filesystem path and a
+    connection is made to an AF\_UNIX socket at that path.
 
 ## OPTIONS
 
@@ -55,6 +57,15 @@ for the libcrypto implementation.
     Tune the implementation to optimise for throughput (large frames,
     fewer syscalls) or latency (smaller frames, more syscalls). TODO:
     figure out the default.
+
+  - **-async**  
+    Only valid for **s2n::socket**: don’t block on establishing the
+    connection to *host*:*port*, but return immediately. If data is
+    written in blocking mode before the connection is established and
+    the TLS handshake is completed then the write will block until these
+    are done and the data is written. In non-blocking mode the channel
+    will become writable when the TLS handshake completes, and readable
+    once application data arrives from the peer.
 
 ## CONFIG
 
