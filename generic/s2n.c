@@ -1704,10 +1704,15 @@ DLLEXPORT int S2n_Unload(Tcl_Interp* interp, int flags) //<<<
 				struct con_cx*	con_cx = (struct con_cx*)Tcl_GetHashValue(he);
 				if (con_cx->type == CHANTYPE_STACKED) {
 					CLOGS(LIFECYCLE, "unstacking stacked channel: %s", clogs_name(con_cx));
-					Tcl_UnstackChannel(interp, con_cx->basechan);
+					Tcl_UnstackChannel(interp, con_cx->chan);
 				} else {
-					CLOGS(LIFECYCLE, "closing channel: %s", clogs_name(con_cx));
-					Tcl_Close(interp, con_cx->chan);
+					CLOGS(LIFECYCLE, "unregistering channel: %s", clogs_name(con_cx));
+					// TODO: figure out the correct approach here.  All of these seem wrong
+					//Tcl_Close(interp, con_cx->chan);
+					//Tcl_UnregisterChannel(interp, con_cx->chan);
+					//Tcl_UnstackChannel(interp, con_cx->chan);
+					Tcl_DeleteChannelHandler(con_cx->chan, s2n_direct_chan_handler, con_cx);
+					Tcl_DeleteHashEntry(he);
 				}
 			}
 			Tcl_DeleteHashTable(&g_managed_chans);
