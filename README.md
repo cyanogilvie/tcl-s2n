@@ -4,7 +4,7 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.3.5?
+**package require s2n** ?0.4.0?
 
 **s2n::push** *channelName* ?*-opt* *val* …?  
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -119,13 +119,13 @@ support 8.6.
 ### From a Release Tarball
 
 Download and extract [the
-release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz),
+release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.0/tcl-s2n-0.4.0.tar.gz),
 then build in the standard TEA way:
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz
-tar xf tcl-s2n-0.3.5.tar.gz
-cd tcl-s2n-0.3.5
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.0/tcl-s2n-0.4.0.tar.gz
+tar xf tcl-s2n-0.4.0.tar.gz
+cd tcl-s2n-0.4.0
 ./configure
 make
 sudo make install
@@ -153,7 +153,7 @@ and strip debug symbols, minimising image size:
 
 ``` dockerfile
 WORKDIR /tmp/tcl-s2n
-RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.3.5/tcl-s2n-0.3.5.tar.gz -O - | tar xz --strip-components=1 && \
+RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.0/tcl-s2n-0.4.0.tar.gz -O - | tar xz --strip-components=1 && \
     ./configure; make test install-binaries install-libraries && \
     strip /usr/local/lib/libs2n*.so && \
     cd .. && rm -rf tcl-s2n

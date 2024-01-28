@@ -63,29 +63,33 @@ static const char* action_str(int action) //<<<
 
 //>>>
 
+// Common driver parts <<<
+static int s2n_common_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr);
+static int s2n_common_chan_output(ClientData cdata, const char* buf, int toWrite, int* errorCodePtr);
+static int s2n_common_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags);
+static int s2n_common_chan_seek(ClientData cdata, long offset, int mode, int* errorCodePtr);
+static void s2n_common_chan_thread_action(ClientData cdata, int action);
+// Common driver parts >>>
 // Stacked channel implementation <<<
 static int s2n_stacked_chan_block_mode(ClientData cdata, int mode);
-static int s2n_stacked_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags);
-static int s2n_stacked_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr);
-static int s2n_stacked_chan_output(ClientData cdata, const char* buf, int toWrite, int* errorCodePtr);
 static int s2n_stacked_chan_set_option(ClientData cdata, Tcl_Interp* interp, const char* optname, const char* optval);
 static int s2n_stacked_chan_get_option(ClientData cdata, Tcl_Interp* interp, const char* optname, Tcl_DString* dsPtr);
 static void s2n_stacked_chan_watch(ClientData cdata, int mask);
 static int s2n_stacked_chan_handler(ClientData cdata, int mask);
-static void s2n_stacked_chan_thread_action(ClientData cdata, int action);
 
 Tcl_ChannelType	s2n_stacked_channel_type = {
 	.typeName			= "s2n_stacked",
 	.version			= TCL_CHANNEL_VERSION_5,
 	.blockModeProc		= s2n_stacked_chan_block_mode,
-	.close2Proc			= s2n_stacked_chan_close2,
-	.inputProc			= s2n_stacked_chan_input,
-	.outputProc			= s2n_stacked_chan_output,
+	.close2Proc			= s2n_common_chan_close2,
+	.inputProc			= s2n_common_chan_input,
+	.outputProc			= s2n_common_chan_output,
 	.setOptionProc		= s2n_stacked_chan_set_option,
 	.getOptionProc		= s2n_stacked_chan_get_option,
 	.watchProc			= s2n_stacked_chan_watch,
 	.handlerProc		= s2n_stacked_chan_handler,
-	.threadActionProc	= s2n_stacked_chan_thread_action,
+	.threadActionProc	= s2n_common_chan_thread_action,
+	.seekProc			= s2n_common_chan_seek,
 };
 
 static int s2n_stacked_chan_block_mode(ClientData cdata, int mode) //<<<
@@ -93,208 +97,6 @@ static int s2n_stacked_chan_block_mode(ClientData cdata, int mode) //<<<
 	struct con_cx*	con_cx = cdata;
 	Tcl_DriverBlockModeProc*	base_blockmode = Tcl_ChannelBlockModeProc(Tcl_GetChannelType(con_cx->basechan));
 	return base_blockmode(Tcl_GetChannelInstanceData(con_cx->basechan), mode);
-}
-
-//>>>
-static int s2n_stacked_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags) //<<<
-{
-	int				posixcode = 0;
-	struct con_cx*	con_cx = cdata;
-
-	CLOGS(IO, "--> %x", flags);
-	if (flags & TCL_CLOSE_READ) {
-		if (interp) {
-			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_stacked_chan_close2: Cannot close read side"));
-			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-		}
-		posixcode = EINVAL;
-		goto finally;
-	} else if (flags & TCL_CLOSE_WRITE && !con_cx->write_closed) {
-		s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-		const int rc = s2n_shutdown_send(con_cx->s2n_con, &blocked);
-		if (rc == S2N_SUCCESS) {
-			con_cx->write_closed = 1;
-		} else {
-			switch (s2n_error_get_type(s2n_errno)) {
-				case S2N_ERR_T_BLOCKED:
-				case S2N_ERR_T_CLOSED:
-					con_cx->write_closed = 1;
-					break;
-
-				case S2N_ERR_T_IO:
-					posixcode = errno;
-					goto set_interp_err1;
-
-				case S2N_ERR_T_PROTO:
-					posixcode = EPROTO;
-					goto set_interp_err1;
-
-				default:
-					posixcode = EINVAL;
-					goto set_interp_err1;
-
-				set_interp_err1:
-					if (interp) {
-						Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_stacked_chan_close2: s2n_shutdown_send failed: %s", s2n_strerror(s2n_errno, "EN")));
-						Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-					}
-			}
-		}
-
-	} else if (flags == 0) {
-		CLOGS(LIFECYCLE, "closing connection %s", S2N_CON_NAME(con_cx->s2n_con));
-		if (con_cx->write_closed) {
-			free_con_cx(con_cx);
-			con_cx = NULL;
-		} else {
-			s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-			CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
-			const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
-			// TODO: Handle blocked?
-			if (rc == S2N_SUCCESS) {
-				free_con_cx(con_cx);
-				con_cx = NULL;
-			} else {
-				switch (s2n_error_get_type(s2n_errno)) {
-					case S2N_ERR_T_BLOCKED:
-					case S2N_ERR_T_CLOSED:
-						free_con_cx(con_cx);
-						con_cx = NULL;
-						break;
-
-					case S2N_ERR_T_IO:
-						posixcode = errno;
-						goto set_interp_err2;
-
-					case S2N_ERR_T_PROTO:
-						posixcode = EPROTO;
-						goto set_interp_err2;
-
-					default:
-						posixcode = EINVAL;
-						goto set_interp_err2;
-
-					set_interp_err2:
-						if (interp) {
-							Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_stacked_chan_close2: s2n_shutdown_send failed: %s", s2n_strerror(s2n_errno, "EN")));
-							Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-						}
-				}
-			}
-		}
-		// TODO: close lower channel?
-	} else {
-		if (interp) {
-			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_stacked_chan_close2: unknown flags: %d", flags));
-			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-		}
-		posixcode = EINVAL;
-		goto finally;
-	}
-
-finally:
-	CLOGS(IO, "<-- %x returning %d", flags, posixcode);
-	return posixcode;
-}
-
-//>>>
-static int s2n_stacked_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr) //<<<
-{
-	struct con_cx*		con_cx = cdata;
-	s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-	int					remain = toRead;
-	int					read_total = 0;
-
-	if (con_cx->read_closed) return 0;
-
-	CLOGS(IO, "--> toRead: %d", toRead);
-	while (remain) {
-		const ssize_t got = s2n_recv(con_cx->s2n_con, buf+read_total, remain, &blocked);
-		CLOGS(IO, "\ts2n_recv(%d) got %zd bytes", remain, got);
-		if (got > 0) {
-			remain -= got;
-			read_total += got;
-			con_cx->read_count += got;
-		} else if (got == 0) {
-			con_cx->read_closed = 1;
-			break;
-        } else {
-			switch (s2n_error_get_type(s2n_errno)) {
-				case S2N_ERR_T_BLOCKED:
-					if (read_total == 0) {
-						*errorCodePtr = EAGAIN;
-						read_total = -1;
-					}
-					break;
-				case S2N_ERR_T_CLOSED:
-					con_cx->read_closed = 1;
-					break;
-				default:
-					fprintf(stderr, "\ts2n_stacked_chan_input: s2n_recv failed: %s, errno: %d\n", s2n_strerror(s2n_errno, "EN"), errno);
-					*errorCodePtr = errno ? errno : EIO;
-					read_total = -1;
-					break;
-			}
-			break;
-		}
-	}
-
-	CLOGS(IO, "<-- toRead: %d returning %d", toRead, read_total);
-	return read_total;
-}
-
-//>>>
-static int s2n_stacked_chan_output(ClientData cdata, const char* buf, int toWrite, int* errorCodePtr) //<<<
-{
-	struct con_cx*		con_cx = cdata;
-	s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-    int					bytes_written = 0;
-	int					remain = toWrite;
-
-	if (con_cx->write_closed) {
-		CLOGS(IO, "write closed");
-		*errorCodePtr = EPIPE;
-		return -1;
-	}
-
-	CLOGS(IO, "--> toWrite: %d", toWrite);
-
-	if (g_unloading) {
-		CLOGS(IO, "unloading, returning ENOTCONN");
-		*errorCodePtr = ENOTCONN;
-		bytes_written = -1;
-		goto done;
-	}
-
-	if (con_cx->handshake_done) {
-		while (remain) {
-			const int	wrote = s2n_send(con_cx->s2n_con, buf+bytes_written, remain, &blocked);
-			CLOGS(IO, "\ts2n_send(%d) wrote %d bytes", remain, wrote);
-			if (wrote >= 0) {
-				bytes_written += wrote;
-				remain -= wrote;
-				con_cx->write_count += wrote;
-			} else if (s2n_error_get_type(s2n_errno) == S2N_ERR_T_BLOCKED && blocked == S2N_BLOCKED_ON_WRITE) {
-				if (bytes_written == 0) {
-					*errorCodePtr = EAGAIN;
-					bytes_written = -1;
-				}
-				break;
-			} else {
-				*errorCodePtr = errno;
-				bytes_written = -1;
-				break;
-			}
-		}
-	} else {
-		CLOGS(IO, "handshake not done, returning EAGAIN");
-		*errorCodePtr = EAGAIN;
-		bytes_written = -1;
-	}
-
-done:
-	CLOGS(IO, "<-- toWrite: %d returning %d", toWrite, bytes_written);
-	return bytes_written;
 }
 
 //>>>
@@ -442,42 +244,27 @@ static int s2n_stacked_chan_handler(ClientData cdata, int mask) //<<<
 }
 
 //>>>
-static void s2n_stacked_chan_thread_action(ClientData cdata, int action) //<<<
-{
-	struct con_cx*	con_cx = cdata;
-	CLOGS(LIFECYCLE, "%s: %s", S2N_CON_NAME(con_cx->s2n_con), action_str(action));
-	Tcl_DriverThreadActionProc*	base_thread_action = Tcl_ChannelThreadActionProc(Tcl_GetChannelType(con_cx->basechan));
-	if (base_thread_action)
-		base_thread_action(Tcl_GetChannelInstanceData(con_cx->basechan), action);
-}
-
-//>>>
 // Stacked channel implementation >>>
 // Direct channel implementation <<<
 static int s2n_direct_chan_block_mode(ClientData cdata, int mode);
-static int s2n_direct_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags);
-static int s2n_direct_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr);
-static int s2n_direct_chan_output(ClientData cdata, const char* buf, int toWrite, int* errorCodePtr);
 static int s2n_direct_chan_set_option(ClientData cdata, Tcl_Interp* interp, const char* optname, const char* optval);
 static int s2n_direct_chan_get_option(ClientData cdata, Tcl_Interp* interp, const char* optname, Tcl_DString* dsPtr);
 static void s2n_direct_chan_watch(ClientData cdata, int mask);
 static void s2n_direct_chan_handler(ClientData cdata, int mask);
-static void s2n_direct_chan_thread_action(ClientData cdata, int action);
-static int s2n_direct_chan_seek(ClientData cdata, long offset, int mode, int* errorCodePtr);
 
 Tcl_ChannelType	s2n_direct_channel_type = {
 	.typeName			= "s2n_direct",
 	.version			= TCL_CHANNEL_VERSION_5,
 	.blockModeProc		= s2n_direct_chan_block_mode,
-	.close2Proc			= s2n_direct_chan_close2,
-	.inputProc			= s2n_direct_chan_input,
-	.outputProc			= s2n_direct_chan_output,
+	.close2Proc			= s2n_common_chan_close2,
+	.inputProc			= s2n_common_chan_input,
+	.outputProc			= s2n_common_chan_output,
 	.setOptionProc		= s2n_direct_chan_set_option,
 	.getOptionProc		= s2n_direct_chan_get_option,
 	.watchProc			= s2n_direct_chan_watch,
 	//.handlerProc		= s2n_direct_chan_handler,		// Called by Tcl_CreateFileHandler
-	.threadActionProc	= s2n_direct_chan_thread_action,
-	.seekProc			= s2n_direct_chan_seek,
+	.threadActionProc	= s2n_common_chan_thread_action,
+	.seekProc			= s2n_common_chan_seek,
 };
 
 struct s2n_direct_ev {
@@ -506,235 +293,6 @@ static int s2n_direct_chan_block_mode(ClientData cdata, int mode) //<<<
 	CLOGS(IO, "Set block mode: %d", fcntl(con_cx->fd, F_GETFL) & O_NONBLOCK ? 1 : 0);
 
 	return 0;
-}
-
-//>>>
-static int s2n_direct_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags) //<<<
-{
-	int				posixcode = 0;
-	struct con_cx*	con_cx = cdata;
-
-	CLOGS(IO, "--> %x", flags);
-	if (flags & TCL_CLOSE_READ) {
-		if (interp) {
-			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_direct_chan_close2: Cannot close read side"));
-			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-		}
-		posixcode = EINVAL;
-		goto finally;
-	} else if (flags & TCL_CLOSE_WRITE && !con_cx->write_closed) {
-		s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-		const int rc = s2n_shutdown_send(con_cx->s2n_con, &blocked);
-		if (rc == S2N_SUCCESS) {
-			con_cx->write_closed = 1;
-			if (-1 == shutdown(con_cx->fd, SHUT_WR)) {
-				posixcode = errno;
-				goto set_interp_err_errno;
-			}
-		} else {
-			switch (s2n_error_get_type(s2n_errno)) {
-				case S2N_ERR_T_BLOCKED:
-				case S2N_ERR_T_CLOSED:
-					con_cx->write_closed = 1;
-					break;
-
-				case S2N_ERR_T_IO:
-					posixcode = errno;
-					goto set_interp_err_s2n_errno;
-
-				case S2N_ERR_T_PROTO:
-					posixcode = EPROTO;
-					goto set_interp_err_s2n_errno;
-
-				default:
-					posixcode = EINVAL;
-					goto set_interp_err_s2n_errno;
-			}
-		}
-
-	} else if (flags == 0) {
-		CLOGS(LIFECYCLE, "closing connection %s", S2N_CON_NAME(con_cx->s2n_con));
-		if (con_cx->write_closed) {
-			goto close_sock;
-		} else {
-			s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-			CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
-			const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
-			// TODO: Handle blocked?
-			if (rc == S2N_SUCCESS) {
-				goto close_sock;
-			} else {
-				switch (s2n_error_get_type(s2n_errno)) {
-					case S2N_ERR_T_BLOCKED:
-					case S2N_ERR_T_CLOSED:
-						goto close_sock;
-
-					case S2N_ERR_T_IO:
-						posixcode = errno;
-						goto set_interp_err_s2n_errno;
-
-					case S2N_ERR_T_PROTO:
-						posixcode = EPROTO;
-						goto set_interp_err_s2n_errno;
-
-					default:
-						posixcode = EINVAL;
-						goto set_interp_err_s2n_errno;
-				}
-			}
-		}
-
-	} else {
-		if (interp) {
-			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_direct_chan_close2: unknown flags: %d", flags));
-			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-		}
-		posixcode = EINVAL;
-		goto finally;
-	}
-
-finally:
-	CLOGS(IO, "<-- %x returning %d", flags, posixcode);
-	return posixcode;
-
-set_interp_err_s2n_errno:
-	if (interp) {
-		Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_direct_chan_close2: s2n_shutdown_send failed: %s", s2n_strerror(s2n_errno, "EN")));
-		Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-	}
-	posixcode = EIO;
-	goto finally;
-
-set_interp_err_errno:
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-	int code;
-	posixcode = errno;
-	if (interp) THROW_POSIX_LABEL(finally, code, "close");
-	goto finally;
-#pragma GCC diagnostic pop
-
-close_sock:
-	const int rc = close(con_cx->fd);
-	free_con_cx(con_cx);
-	con_cx = NULL;
-	if (rc == -1) {
-		posixcode = errno;
-		goto set_interp_err_errno;
-	}
-	goto finally;
-}
-
-//>>>
-static int s2n_direct_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr) //<<<
-{
-	struct con_cx*		con_cx = cdata;
-	s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-	int					remain = toRead;
-	int					read_total = 0;
-
-	if (con_cx->read_closed) return 0;
-
-	CLOGS(IO, "--> toRead: %d", toRead);
-	while (remain) {
-		const ssize_t got = s2n_recv(con_cx->s2n_con, buf+read_total, remain, &blocked);
-		CLOGS(IO, "\ts2n_recv(%d) got %zd bytes", remain, got);
-		if (got > 0) {
-			remain -= got;
-			read_total += got;
-			con_cx->read_count += got;
-		} else if (got == 0) {
-			con_cx->read_closed = 1;
-			break;
-        } else {
-			switch (s2n_error_get_type(s2n_errno)) {
-				case S2N_ERR_T_BLOCKED:
-					if (read_total == 0) {
-						*errorCodePtr = EAGAIN;
-						read_total = -1;
-					}
-					break;
-				case S2N_ERR_T_CLOSED:
-					con_cx->read_closed = 1;
-					break;
-				default:
-					fprintf(stderr, "\ts2n_direct_chan_input: s2n_recv failed: %s, errno: %d\n", s2n_strerror(s2n_errno, "EN"), errno);
-					*errorCodePtr = errno ? errno : EIO;
-					read_total = -1;
-					break;
-			}
-			break;
-		}
-	}
-
-	CLOGS(IO, "<-- toRead: %d returning %d", toRead, read_total);
-	return read_total;
-}
-
-//>>>
-static int s2n_direct_chan_output(ClientData cdata, const char* buf, int toWrite, int* errorCodePtr) //<<<
-{
-	struct con_cx*		con_cx = cdata;
-	s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-    int					bytes_written = 0;
-	int					remain = toWrite;
-
-	if (con_cx->write_closed) {
-		CLOGS(IO, "write closed");
-		*errorCodePtr = EPIPE;
-		return -1;
-	}
-
-	CLOGS(IO, "--> toWrite: %d", toWrite);
-	if (g_unloading) {
-		CLOGS(IO, "unloading, returning ENOTCONN");
-		*errorCodePtr = ENOTCONN;
-		bytes_written = -1;
-		goto done;
-	}
-
-	if (con_cx->handshake_done) {
-		while (remain) {
-			const int	wrote = s2n_send(con_cx->s2n_con, buf+bytes_written, remain, &blocked);
-			CLOGS(IO, "\ts2n_send(%d) wrote %d bytes", remain, wrote);
-			if (wrote >= 0) {
-				bytes_written += wrote;
-				remain -= wrote;
-				con_cx->write_count += wrote;
-			} else {
-				switch (s2n_error_get_type(s2n_errno)) {
-					case S2N_ERR_T_BLOCKED:
-						if (blocked == S2N_BLOCKED_ON_WRITE) {
-							if (bytes_written == 0) {
-								*errorCodePtr = EAGAIN;
-								bytes_written = -1;
-							}
-						}
-						goto done;
-
-					case S2N_ERR_T_IO:
-						CLOGS(IO, "s2n_send error:%s  %s", Tcl_ErrnoId(), Tcl_ErrnoMsg(errno));
-						*errorCodePtr = errno;
-						bytes_written = -1;
-						goto done;
-
-					default:
-						CLOGS(IO, "s2n_send error: %s", s2n_strerror(s2n_errno, "EN"));
-						*errorCodePtr = EIO;
-						bytes_written = -1;
-						goto done;
-				}
-			}
-		}
-	} else {
-		CLOGS(IO, "handshake not done, returning EAGAIN");
-		*errorCodePtr = EAGAIN;
-		bytes_written = -1;
-	}
-
-done:
-	CLOGS(IO, "<-- toWrite: %d returning %d", toWrite, bytes_written);
-	return bytes_written;
 }
 
 //>>>
@@ -904,14 +462,250 @@ static void s2n_direct_chan_handler(ClientData cdata, int mask) //<<<
 }
 
 //>>>
-static void s2n_direct_chan_thread_action(ClientData cdata, int action) //<<<
+
+// Direct channel implementation >>>
+// Common parts implementation <<<
+static int s2n_common_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr) //<<<
+{
+	struct con_cx*		con_cx = cdata;
+	s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
+	int					remain = toRead;
+	int					read_total = 0;
+
+	if (con_cx->read_closed) return 0;
+
+	CLOGS(IO, "--> toRead: %d", toRead);
+	while (remain) {
+		const ssize_t got = s2n_recv(con_cx->s2n_con, buf+read_total, remain, &blocked);
+		CLOGS(IO, "\ts2n_recv(%d) got %zd bytes", remain, got);
+		if (got > 0) {
+			remain -= got;
+			read_total += got;
+			con_cx->read_count += got;
+		} else if (got == 0) {
+			con_cx->read_closed = 1;
+			break;
+        } else {
+			switch (s2n_error_get_type(s2n_errno)) {
+				case S2N_ERR_T_BLOCKED:
+					if (read_total == 0) {
+						*errorCodePtr = EAGAIN;
+						read_total = -1;
+					}
+					break;
+				case S2N_ERR_T_CLOSED:
+					con_cx->read_closed = 1;
+					break;
+				default:
+					fprintf(stderr, "\ts2n_common_chan_input: s2n_recv failed: %s, errno: %d\n", s2n_strerror(s2n_errno, "EN"), errno);
+					*errorCodePtr = errno ? errno : EIO;
+					read_total = -1;
+					break;
+			}
+			break;
+		}
+	}
+
+	CLOGS(IO, "<-- toRead: %d returning %d", toRead, read_total);
+	return read_total;
+}
+
+//>>>
+static int s2n_common_chan_output(ClientData cdata, const char* buf, int toWrite, int* errorCodePtr) //<<<
+{
+	struct con_cx*		con_cx = cdata;
+	s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
+    int					bytes_written = 0;
+	int					remain = toWrite;
+
+	if (con_cx->write_closed) {
+		CLOGS(IO, "write closed");
+		*errorCodePtr = EPIPE;
+		return -1;
+	}
+
+	CLOGS(IO, "--> toWrite: %d", toWrite);
+	if (g_unloading) {
+		CLOGS(IO, "unloading, returning ENOTCONN");
+		*errorCodePtr = ENOTCONN;
+		bytes_written = -1;
+		goto done;
+	}
+
+	if (con_cx->handshake_done) {
+		while (remain) {
+			const int	wrote = s2n_send(con_cx->s2n_con, buf+bytes_written, remain, &blocked);
+			CLOGS(IO, "\ts2n_send(%d) wrote %d bytes", remain, wrote);
+			if (wrote >= 0) {
+				bytes_written += wrote;
+				remain -= wrote;
+				con_cx->write_count += wrote;
+			} else {
+				switch (s2n_error_get_type(s2n_errno)) {
+					case S2N_ERR_T_BLOCKED:
+						if (blocked == S2N_BLOCKED_ON_WRITE) {
+							if (bytes_written == 0) {
+								*errorCodePtr = EAGAIN;
+								bytes_written = -1;
+							}
+						}
+						goto done;
+
+					case S2N_ERR_T_IO:
+						CLOGS(IO, "s2n_send error:%s  %s", Tcl_ErrnoId(), Tcl_ErrnoMsg(errno));
+						*errorCodePtr = errno;
+						bytes_written = -1;
+						goto done;
+
+					default:
+						CLOGS(IO, "s2n_send error: %s", s2n_strerror(s2n_errno, "EN"));
+						*errorCodePtr = EIO;
+						bytes_written = -1;
+						goto done;
+				}
+			}
+		}
+	} else {
+		CLOGS(IO, "handshake not done, returning EAGAIN");
+		*errorCodePtr = EAGAIN;
+		bytes_written = -1;
+	}
+
+done:
+	CLOGS(IO, "<-- toWrite: %d returning %d", toWrite, bytes_written);
+	return bytes_written;
+}
+
+//>>>
+static int s2n_common_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags) //<<<
+{
+	int				posixcode = 0;
+	struct con_cx*	con_cx = cdata;
+
+	CLOGS(IO, "--> %x", flags);
+	if (flags & TCL_CLOSE_READ) {
+		if (interp) {
+			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_common_chan_close2: Cannot close read side"));
+			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
+		}
+		posixcode = EINVAL;
+		goto finally;
+	} else if (flags & TCL_CLOSE_WRITE && !con_cx->write_closed) {
+		s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
+		const int rc = s2n_shutdown_send(con_cx->s2n_con, &blocked);
+		if (rc == S2N_SUCCESS) {
+			con_cx->write_closed = 1;
+			if (con_cx->type == CHANTYPE_DIRECT) {
+				if (-1 == shutdown(con_cx->fd, SHUT_WR)) {
+					posixcode = errno;
+					goto set_interp_err_errno;
+				}
+			}
+		} else {
+			switch (s2n_error_get_type(s2n_errno)) {
+				case S2N_ERR_T_BLOCKED:
+				case S2N_ERR_T_CLOSED:
+					con_cx->write_closed = 1;
+					break;
+
+				case S2N_ERR_T_IO:
+					posixcode = errno;
+					goto set_interp_err_s2n_errno;
+
+				case S2N_ERR_T_PROTO:
+					posixcode = EPROTO;
+					goto set_interp_err_s2n_errno;
+
+				default:
+					posixcode = EINVAL;
+					goto set_interp_err_s2n_errno;
+			}
+		}
+
+	} else if (flags == 0) {
+		CLOGS(LIFECYCLE, "closing connection %s", S2N_CON_NAME(con_cx->s2n_con));
+		if (con_cx->write_closed) {
+			goto close_sock;
+		} else {
+			s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
+			CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
+			const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
+			// TODO: Handle blocked?
+			if (rc == S2N_SUCCESS) {
+				goto close_sock;
+			} else {
+				switch (s2n_error_get_type(s2n_errno)) {
+					case S2N_ERR_T_BLOCKED:
+					case S2N_ERR_T_CLOSED:
+						goto close_sock;
+
+					case S2N_ERR_T_IO:
+						posixcode = errno;
+						goto set_interp_err_s2n_errno;
+
+					case S2N_ERR_T_PROTO:
+						posixcode = EPROTO;
+						goto set_interp_err_s2n_errno;
+
+					default:
+						posixcode = EINVAL;
+						goto set_interp_err_s2n_errno;
+				}
+			}
+		}
+
+	} else {
+		if (interp) {
+			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_common_chan_close2: unknown flags: %d", flags));
+			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
+		}
+		posixcode = EINVAL;
+		goto finally;
+	}
+
+finally:
+	CLOGS(IO, "<-- %x returning %d", flags, posixcode);
+	return posixcode;
+
+set_interp_err_s2n_errno:
+	if (interp) {
+		Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_direct_chan_close2: s2n_shutdown_send failed: %s", s2n_strerror(s2n_errno, "EN")));
+		Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
+	}
+	posixcode = EIO;
+	goto finally;
+
+set_interp_err_errno:
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+	int code;
+	posixcode = errno;
+	if (interp) THROW_POSIX_LABEL(finally, code, "close");
+	goto finally;
+#pragma GCC diagnostic pop
+
+close_sock:
+	const int is_direct	= con_cx->type == CHANTYPE_DIRECT;
+	int rc = 0;
+	if (is_direct) rc = close(con_cx->fd);
+	free_con_cx(con_cx);
+	con_cx = NULL;
+	if (is_direct && rc == -1) {
+		posixcode = errno;
+		goto set_interp_err_errno;
+	}
+	goto finally;
+}
+
+//>>>
+static void s2n_common_chan_thread_action(ClientData cdata, int action) //<<<
 {
 	struct con_cx*	con_cx = cdata;
 	CLOGS(LIFECYCLE, "%s: %s", S2N_CON_NAME(con_cx->s2n_con), action_str(action));
 }
 
 //>>>
-static int s2n_direct_chan_seek(ClientData cdata, long offset, int mode, int* errorCodePtr) //<<<
+static int s2n_common_chan_seek(ClientData cdata, long offset, int mode, int* errorCodePtr) //<<<
 {
 	struct con_cx*	con_cx = cdata;
 
@@ -925,7 +719,7 @@ static int s2n_direct_chan_seek(ClientData cdata, long offset, int mode, int* er
 
 //>>>
 
-// Direct channel implementation >>>
+// Common parts implementation >>>
 
 // Internal API <<<
 void free_interp_cx(ClientData cdata, Tcl_Interp* interp) //<<<
@@ -1483,6 +1277,7 @@ OBJCMD(socket_cmd) //<<<
 
 	if (async) {
 		CLOGS(IO, "async mode, registering watch for %s", mask_str(TCL_WRITABLE));
+		// TODO: this errors in epoll_ctl with EBADF for -async, investigate the mess: https://cr.yp.to/docs/connect.html
 		Tcl_CreateFileHandler(con_cx->fd, TCL_WRITABLE, s2n_direct_chan_handler, con_cx);
 	} else {
 		con_cx->connected = 1;
