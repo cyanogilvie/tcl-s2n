@@ -5,7 +5,7 @@
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <meta name="author" content="Cyan Ogilvie" />
-  <title>s2n(3) 0.4.0 | s2n Tcl wrapper</title>
+  <title>s2n(3) 0.4.1 | s2n Tcl wrapper</title>
   <style>
     code{white-space: pre-wrap;}
     span.smallcaps{font-variant: small-caps;}
@@ -96,13 +96,13 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">s2n(3) 0.4.0 | s2n Tcl wrapper</h1>
+<h1 class="title">s2n(3) 0.4.1 | s2n Tcl wrapper</h1>
 <p class="author">Cyan Ogilvie</p>
 </header>
 <h1 id="s2n">S2N</h1>
 <p>s2n Tcl wrapper - layer TLS onto Tcl channels</p>
 <h2 id="synopsis">SYNOPSIS</h2>
-<p><strong>package require s2n</strong> ?0.4.0?</p>
+<p><strong>package require s2n</strong> ?0.4.1?</p>
 <p><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?<br />
 <strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …? <em>host</em> <em>port</em></p>
 <h2 id="description">DESCRIPTION</h2>
@@ -159,10 +159,10 @@
 <p>This package has no external dependencies other than Tcl. The s2n and aws-lc libraries it depends on are included as submodules (or baked into the release tarball) and are built and statically linked as part of the package build process.</p>
 <p>Currently Tcl 8.7 is required, but if needed polyfills could be built to support 8.6.</p>
 <h3 id="from-a-release-tarball">From a Release Tarball</h3>
-<p>Download and extract <a href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.0/tcl-s2n-0.4.0.tar.gz">the release</a>, then build in the standard TEA way:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.0/tcl-s2n-0.4.0.tar.gz</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a><span class="fu">tar</span> xf tcl-s2n-0.4.0.tar.gz</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true"></a><span class="bu">cd</span> tcl-s2n-0.4.0</span>
+<p>Download and extract <a href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.1/tcl-s2n-0.4.1.tar.gz">the release</a>, then build in the standard TEA way:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.1/tcl-s2n-0.4.1.tar.gz</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a><span class="fu">tar</span> xf tcl-s2n-0.4.1.tar.gz</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true"></a><span class="bu">cd</span> tcl-s2n-0.4.1</span>
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true"></a><span class="ex">./configure</span></span>
 <span id="cb2-5"><a href="#cb2-5" aria-hidden="true"></a><span class="fu">make</span></span>
 <span id="cb2-6"><a href="#cb2-6" aria-hidden="true"></a><span class="fu">sudo</span> make install</span></code></pre></div>
@@ -177,7 +177,7 @@
 <h3 id="in-a-docker-build">In a Docker Build</h3>
 <p>Build from a specified release version, avoiding layer pollution and only adding the installed package without documentation to the image, and strip debug symbols, minimising image size:</p>
 <div class="sourceCode" id="cb4"><pre class="sourceCode dockerfile"><code class="sourceCode dockerfile"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="kw">WORKDIR</span> /tmp/tcl-s2n</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="kw">RUN</span> wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.0/tcl-s2n-0.4.0.tar.gz -O - | tar xz --strip-components=1 &amp;&amp; \</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="kw">RUN</span> wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.4.1/tcl-s2n-0.4.1.tar.gz -O - | tar xz --strip-components=1 &amp;&amp; \</span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true"></a>    ./configure; make test install-binaries install-libraries &amp;&amp; \</span>
 <span id="cb4-4"><a href="#cb4-4" aria-hidden="true"></a>    strip /usr/local/lib/libs2n*.so &amp;&amp; \</span>
 <span id="cb4-5"><a href="#cb4-5" aria-hidden="true"></a>    cd .. &amp;&amp; rm -rf tcl-s2n</span></code></pre></div>
