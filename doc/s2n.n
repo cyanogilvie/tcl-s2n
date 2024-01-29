@@ -208,6 +208,53 @@ way that could be exploited by other code running on the shared memory
 For this reason, careful consideration should be given to the security
 requirements of the application as a whole when using this package in a
 shared execution context, or in a virtual machine.
+.SS MLOCK CONSIDERATIONS
+.PP
+The s2n-tls library uses mlock by default to prevent memory containing
+key material from being paged to disk (where it could leak to other
+processes or be recovered by a later forensic analysis of the disk).
+Unfortunately containers default to removing the needed capability to
+allow that (IPC_LOCK).
+That manifests as an error thrown during s2n initialisation:
+.IP
+.nf
+\f[C]
+% docker run --rm -it cyanogilvie/alpine-tcl:v0.9.87-stripped
+tclsh8.7 [/here] package require s2n
+s2n_init failed: error calling mlock (Did you run prlimit?)
+while evaluating package require s2n
+tclsh8.7 [/here] set errorCode
+S2N S2N_ERR_MLOCK
+tclsh8.7 [/here]
+\f[R]
+.fi
+.PP
+If you need to use this package in a container and are able to modify
+the capabilities then granting the IPC_LOCK capability will permit s2n
+to use mlock.
+For example, using docker that looks like this:
+.IP
+.nf
+\f[C]
+% docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
+tclsh8.7 [/here] package require s2n
+0.4.1
+tclsh8.7 [/here] 
+\f[R]
+.fi
+.PP
+If you cannot add the IPC_LOCK capability then s2n\[cq]s use of mlock
+can be disabled by setting the S2N_DONT_MLOCK environment variable (at
+the cost of losing the mlock protection for key material):
+.IP
+.nf
+\f[C]
+% docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
+tclsh8.7 [/here] package require s2n
+0.4.1
+tclsh8.7 [/here]
+\f[R]
+.fi
 .SS FUZZING
 .PP
 TODO
@@ -224,7 +271,7 @@ library (https://github.com/aws/s2n-tls) and the aws-lc
 library (https://github.com/aws/aws-lc).
 .SS PROJECT STATUS
 .PP
-This is a very early work in progress.
+This is a very early work in progress, but is in limited production use.
 .PP
 With the nature of this package a lot of care is taken with memory
 handling and test coverage.
@@ -234,6 +281,13 @@ valgrind.
 The \f[C]make valgrind\f[R], \f[C]make test\f[R] and
 \f[C]make coverage\f[R] build targets support these goals.
 The test suite is currently a long way from full coverage.
+.SS BUGS
+.PP
+There are currently problems with the \f[B]s2n::socket\f[R] command in
+\f[B]-async\f[R] mode, and handling of orphaned channels created by
+\f[B]s2n::socket\f[R] during process exit or unloading this
+extension\[cq]s dll, for now it is recommended to use the stacked
+channel approach with \f[B]s2n::push\f[R] instead.
 .SS SOURCE CODE
 .PP
 This package\[cq]s source code is available at

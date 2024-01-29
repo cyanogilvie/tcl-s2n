@@ -189,6 +189,25 @@
 <div class="sourceCode" id="cb6"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true"></a><span class="fu">make</span> valgrind</span></code></pre></div>
 <h2 id="security">SECURITY</h2>
 <p>Given the limitations of a scripting language environment, this package’s code does not have sufficient control over freed memory contents (or memory paged to disk) to guarantee that key material or other sensitive material (like decrypted messages) can’t leak in a way that could be exploited by other code running on the shared memory (or disk) machine. For this reason, careful consideration should be given to the security requirements of the application as a whole when using this package in a shared execution context, or in a virtual machine.</p>
+<h2 id="mlock-considerations">MLOCK CONSIDERATIONS</h2>
+<p>The s2n-tls library uses mlock by default to prevent memory containing key material from being paged to disk (where it could leak to other processes or be recovered by a later forensic analysis of the disk). Unfortunately containers default to removing the needed capability to allow that (IPC_LOCK). That manifests as an error thrown during s2n initialisation:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true"></a><span class="ex">%</span> docker run --rm -it cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] package require s2n</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true"></a><span class="ex">s2n_init</span> failed: error calling mlock (Did you run prlimit?)</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true"></a><span class="kw">while</span> <span class="ex">evaluating</span> package require s2n</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] set errorCode</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true"></a><span class="ex">S2N</span> S2N_ERR_MLOCK</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here]</span></code></pre></div>
+<p>If you need to use this package in a container and are able to modify the capabilities then granting the IPC_LOCK capability will permit s2n to use mlock. For example, using docker that looks like this:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true"></a><span class="ex">%</span> docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] package require s2n</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true"></a><span class="ex">0.4.1</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] </span></code></pre></div>
+<p>If you cannot add the IPC_LOCK capability then s2n’s use of mlock can be disabled by setting the S2N_DONT_MLOCK environment variable (at the cost of losing the mlock protection for key material):</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true"></a><span class="ex">%</span> docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] package require s2n</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true"></a><span class="ex">0.4.1</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here]</span></code></pre></div>
 <h2 id="fuzzing">FUZZING</h2>
 <p>TODO</p>
 <h2 id="available-in">AVAILABLE IN</h2>
@@ -196,8 +215,10 @@
 <h2 id="see-also">SEE ALSO</h2>
 <p>This package is built on the <a href="https://github.com/aws/s2n-tls">s2n library</a> and the <a href="https://github.com/aws/aws-lc">aws-lc library</a>.</p>
 <h2 id="project-status">PROJECT STATUS</h2>
-<p>This is a very early work in progress.</p>
+<p>This is a very early work in progress, but is in limited production use.</p>
 <p>With the nature of this package a lot of care is taken with memory handling and test coverage. There are no known memory leaks or errors, and the package is routinely tested by running its test suite (which aims at full coverage) through valgrind. The <code>make valgrind</code>, <code>make test</code> and <code>make coverage</code> build targets support these goals. The test suite is currently a long way from full coverage.</p>
+<h2 id="bugs">BUGS</h2>
+<p>There are currently problems with the <strong>s2n::socket</strong> command in <strong>-async</strong> mode, and handling of orphaned channels created by <strong>s2n::socket</strong> during process exit or unloading this extension’s dll, for now it is recommended to use the stacked channel approach with <strong>s2n::push</strong> instead.</p>
 <h2 id="source-code">SOURCE CODE</h2>
 <p>This package’s source code is available at <a href="https://github.com/cyanogilvie/tcl-s2n" class="uri">https://github.com/cyanogilvie/tcl-s2n</a>. Please create issues there for any bugs discovered.</p>
 <h2 id="license">LICENSE</h2>
