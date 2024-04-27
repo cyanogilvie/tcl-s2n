@@ -678,23 +678,27 @@ set_interp_err_s2n_errno:
 set_interp_err_errno:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-	int code;
-	posixcode = errno;
-	if (interp) THROW_POSIX_LABEL(finally, code, "close");
-	goto finally;
+	{
+		int code;
+		posixcode = errno;
+		if (interp) THROW_POSIX_LABEL(finally, code, "close");
+		goto finally;
+	}
 #pragma GCC diagnostic pop
 
 close_sock:
-	const int is_direct	= con_cx->type == CHANTYPE_DIRECT;
-	int rc = 0;
-	if (is_direct) rc = close(con_cx->fd);
-	free_con_cx(con_cx);
-	con_cx = NULL;
-	if (is_direct && rc == -1) {
-		posixcode = errno;
-		goto set_interp_err_errno;
+	{
+		const int is_direct	= con_cx->type == CHANTYPE_DIRECT;
+		int rc = 0;
+		if (is_direct) rc = close(con_cx->fd);
+		free_con_cx(con_cx);
+		con_cx = NULL;
+		if (is_direct && rc == -1) {
+			posixcode = errno;
+			goto set_interp_err_errno;
+		}
+		goto finally;
 	}
-	goto finally;
 }
 
 //>>>
