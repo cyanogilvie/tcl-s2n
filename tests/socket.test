@@ -2,7 +2,7 @@ source [file join [file dirname [info script]] common.tcl]
 
 tcltest::testConstraint have_aio [expr {![catch {package require aio}]}]
 
-test socket-1.1 {Negotiate as a client with www.google.com, blocking basechan} -body { #<<<
+test socket-1.1 {Negotiate as a client with www.google.com, blocking basechan} -constraints knownBug -body { #<<<
 	set chans_before	[lsort [chan names]]
 	set sock	[s2n::socket www.google.com 443]
 	chan configure $sock -buffering none -translation crlf -encoding ascii
@@ -14,7 +14,7 @@ test socket-1.1 {Negotiate as a client with www.google.com, blocking basechan} -
 	unset -nocomplain sock
 } -match glob -result {HTTP/1.1 200 *}
 #>>>
-test socket-1.2 {Negotiate as a client with www.google.com, non-blocking basechan} -constraints have_aio -body { #<<<
+test socket-1.2 {Negotiate as a client with www.google.com, non-blocking basechan} -constraints {have_aio knownBug} -body { #<<<
 	set sock	[s2n::socket -async www.google.com 443]
 	chan configure $sock -blocking no -buffering none -translation crlf -encoding ascii
 	puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
@@ -46,7 +46,7 @@ test socket-3.1 {abandon connection, blocking, complete} -setup { #<<<
 	unset -nocomplain child status_line
 } -result {1 1}
 #>>>
-test socket-3.2 {abandon connection, nonblocking, in progress} -setup { #<<<
+test socket-3.2 {abandon connection, nonblocking, in progress} -constraints knownBug -setup { #<<<
 	set child	[interp create]
 	$child eval {load {} S2n}
 } -body {

@@ -767,6 +767,7 @@ static void register_chan(struct con_cx* con_cx) //<<<
 	he = Tcl_CreateHashEntry(&g_managed_chans, con_cx, &new);
 	if (!new) Tcl_Panic("register_chan: already registered");
 	Tcl_SetHashValue(he, con_cx);
+	con_cx->registered = 1;
 	Tcl_MutexUnlock(&g_init_mutex);
 }
 
@@ -913,7 +914,7 @@ finally:
 void free_con_cx(struct con_cx* con_cx) //<<<
 {
 	CLOGS(LIFECYCLE, "free_con_cx: %s", clogs_name(con_cx));
-	forget_chan(con_cx);
+	if (con_cx->registered) forget_chan(con_cx);
 	if (con_cx->s2n_con) {
 		CLOGS(LIFECYCLE, "Freeing s2n connection: %s", S2N_CON_NAME(con_cx->s2n_con));
 		if (-1 == s2n_connection_free(con_cx->s2n_con)) {
@@ -1066,6 +1067,7 @@ OBJCMD(push_cmd) //<<<
 		CLOGS(HANDSHAKE, "s2n_negotiate success");
 		con_cx->handshake_done = 1;
 	} else {
+		CLOGS(HANDSHAKE, "s2n_strerror_name: %s: %s", s2n_strerror_name(s2n_errno), s2n_strerror(s2n_errno, "EN"));
 		switch (s2n_error_get_type(s2n_errno)) {
 			case S2N_ERR_T_BLOCKED:
 			{

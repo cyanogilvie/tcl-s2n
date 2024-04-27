@@ -95,6 +95,7 @@ struct con_cx {
 	int						handshake_done;
 	int						read_closed;
 	int						write_closed;
+	int						registered;
 };
 
 #ifdef __cplusplus

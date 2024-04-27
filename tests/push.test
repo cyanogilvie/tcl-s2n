@@ -69,6 +69,18 @@ test push-3.2 {abandon connection, nonblocking, in progress} -setup { #<<<
 	unset -nocomplain child
 } -result {}
 #>>>
+test push-4.1 {negotiation failed early, nonblocking} -setup { #<<<
+} -body {
+	set sock	[socket api.sandbox.paypal.com 443]
+	chan configure $sock -blocking 0
+	s2n::push $sock -servername api.sandbox.paypal.com -role client
+	chan configure $sock -buffering none -translation crlf -encoding ascii
+	puts -nonewline $sock "HEAD / HTTP/1.1\nHost: api.sandbox.paypal.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	aio waitfor readable $sock 4
+} -cleanup {
+	unset -nocomplain sock
+} -result readable
+#>>>
 
 # cleanup
 ::tcltest::cleanupTests
