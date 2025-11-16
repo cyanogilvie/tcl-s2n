@@ -3,7 +3,7 @@
 	url = https://github.com/cyanogilvie/teabase
 [submodule "tclconfig"]
 	path = tclconfig
-	url = https://github.com/cyanogilvie/tclconfig
+	url = https://github.com/tcltk/tclconfig
 	shallow = true
 [submodule "deps/s2n-tls"]
 	path = deps/s2n-tls

@@ -45,7 +45,6 @@ test push-3.1 {abandon connection, blocking, complete} -setup { #<<<
 		chan configure $sock -buffering none -translation crlf -encoding ascii
 		puts -nonewline $sock "GET / HTTP/1.1\nHost: www.google.com\nUser-Agent: TLS test\nContent-Length: 0\n\n"
 		set status_line	[gets $sock]
-		puts stderr "status_line: ($status_line)"
 		list [expr {$sock in [chan names]}] [string match {HTTP/1.1 200 *} $status_line]
 	}
 } -cleanup {

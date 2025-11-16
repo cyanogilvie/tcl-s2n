@@ -110,12 +110,12 @@ extern "C" {
 #define NS	"::s2n"
 
 // s2n.c internal interface <<<
-void register_intrep(Tcl_Obj* obj);
-void free_interp_cx(ClientData cdata, Tcl_Interp* interp);
-void free_con_cx(struct con_cx* con_cx);
+MODULE_SCOPE void register_intrep(Tcl_Obj* obj);
+MODULE_SCOPE void free_interp_cx(ClientData cdata, Tcl_Interp* interp);
+MODULE_SCOPE void free_con_cx(struct con_cx* con_cx);
 // s2n.c internal interface >>>
 
-EXTERN int S2n_Init _ANSI_ARGS_((Tcl_Interp * interp));
+extern DLLEXPORT int S2n_Init(Tcl_Interp * interp);
 
 #ifdef __cplusplus
 }

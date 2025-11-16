@@ -1,10 +1,16 @@
+---
+author:
+- Cyan Ogilvie
+title: s2n(3) 0.6.0 \| s2n Tcl wrapper
+---
+
 # S2N
 
 s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.5.1?
+**package require s2n** ?0.6.0?
 
 **s2n::push** *channelName* ?*-opt* *val* …?  
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -18,54 +24,53 @@ for the libcrypto implementation.
 
 ## COMMANDS
 
-  - **s2n::push** *channelName* ?*-opt* *val* …?  
-    Stack a TLS protocol driver onto the channel *channelName*. See
-    **OPTIONS** for the allowed options. The TLS protocol driver may be
-    removed with the standard **chan pop** *channelName* Tcl command.
-    The *channelName* channel may be blocking or non-blocking, and may
-    be a socket created with **-async** and still be waiting for the
-    connection to complete.
+**s2n::push** *channelName* ?*-opt* *val* …?  
+Stack a TLS protocol driver onto the channel *channelName*. See
+**OPTIONS** for the allowed options. The TLS protocol driver may be
+removed with the standard **chan pop** *channelName* Tcl command. The
+*channelName* channel may be blocking or non-blocking, and may be a
+socket created with **-async** and still be waiting for the connection
+to complete.
 
-  - **s2n::socket** ?*-opt* *val* …? *host* *port*  
-    Open a TCP connection to *host*:*port* and handshake with that host
-    as a TLS client. See **OPTIONS** for the available options. If
-    *host* is not a numeric address (IPv4 or IPv6) then it supplies the
-    default for the **-servername** option. If *host* is given as an
-    empty string, then *port* is taken to be a filesystem path and a
-    connection is made to an AF\_UNIX socket at that path.
+**s2n::socket** ?*-opt* *val* …? *host* *port*  
+Open a TCP connection to *host*:*port* and handshake with that host as a
+TLS client. See **OPTIONS** for the available options. If *host* is not
+a numeric address (IPv4 or IPv6) then it supplies the default for the
+**-servername** option. If *host* is given as an empty string, then
+*port* is taken to be a filesystem path and a connection is made to an
+AF_UNIX socket at that path.
 
 ## OPTIONS
 
-  - **-config** *config*  
-    Override the default configuration for the channel, see **CONFIG**
-    for details.
+**-config** *config*  
+Override the default configuration for the channel, see **CONFIG** for
+details.
 
-  - **-role** **client**|**server**  
-    Set the role the TLS driver will play in the TLS handshake. If
-    **client** (the default) the driver will initiate a TLS handshake
-    otherwise it will wait to receive a ClientHello TLS message and
-    handshake as a server. Only valid as an option to the **s2n::push**
-    command, sockets opened using **s2n::socket** area always clients.
+**-role** **client**\|**server**  
+Set the role the TLS driver will play in the TLS handshake. If
+**client** (the default) the driver will initiate a TLS handshake
+otherwise it will wait to receive a ClientHello TLS message and
+handshake as a server. Only valid as an option to the **s2n::push**
+command, sockets opened using **s2n::socket** area always clients.
 
-  - **-servername** *host*  
-    Set the SNI (Server Name Indication) name to send when handshaking
-    as a client. There is no default, if not present, the SNI extension
-    won’t be used. It’s also an error to set this option for server
-    connections.
+**-servername** *host*  
+Set the SNI (Server Name Indication) name to send when handshaking as a
+client. There is no default, if not present, the SNI extension won’t be
+used. It’s also an error to set this option for server connections.
 
-  - **-prefer** **throughput**|**latency**  
-    Tune the implementation to optimise for throughput (large frames,
-    fewer syscalls) or latency (smaller frames, more syscalls). TODO:
-    figure out the default.
+**-prefer** **throughput**\|**latency**  
+Tune the implementation to optimise for throughput (large frames, fewer
+syscalls) or latency (smaller frames, more syscalls). TODO: figure out
+the default.
 
-  - **-async**  
-    Only valid for **s2n::socket**: don’t block on establishing the
-    connection to *host*:*port*, but return immediately. If data is
-    written in blocking mode before the connection is established and
-    the TLS handshake is completed then the write will block until these
-    are done and the data is written. In non-blocking mode the channel
-    will become writable when the TLS handshake completes, and readable
-    once application data arrives from the peer.
+**-async**  
+Only valid for **s2n::socket**: don’t block on establishing the
+connection to *host*:*port*, but return immediately. If data is written
+in blocking mode before the connection is established and the TLS
+handshake is completed then the write will block until these are done
+and the data is written. In non-blocking mode the channel will become
+writable when the TLS handshake completes, and readable once application
+data arrives from the peer.
 
 ## CONFIG
 
@@ -73,25 +78,23 @@ The *config* dictionary can contain the following keys to override the
 default configuration for the connection. An error will be thrown if the
 dictionary contains any unrecognised keys.
 
-  - **session\_tickets** *bool*  
-    If set to a true boolean value, enable session tickets for this
-    connection. Session tickets are a way to bootstrap future
-    connections with a server without going through the full
-    certificate-based key exchange, enabling lower latency connection
-    establishment.
+**session_tickets** *bool*  
+If set to a true boolean value, enable session tickets for this
+connection. Session tickets are a way to bootstrap future connections
+with a server without going through the full certificate-based key
+exchange, enabling lower latency connection establishment.
 
-  - **ticket\_lifetime** {*encrypt\_decrypt\_seconds*
-    *decrypt\_only\_seconds*}  
-    Set the time for which session tickets are valid, as a list of two
-    values. The first, *encrypt\_decrypt\_seconds* is the time for which
-    the ticket may be used to both encrypt and decrypt. The second,
-    *decrypt\_only\_seconds*, is the time during which the key cannot be
-    used to encrypt but may still decrypt.
+**ticket_lifetime** {*encrypt_decrypt_seconds* *decrypt_only_seconds*}  
+Set the time for which session tickets are valid, as a list of two
+values. The first, *encrypt_decrypt_seconds* is the time for which the
+ticket may be used to both encrypt and decrypt. The second,
+*decrypt_only_seconds*, is the time during which the key cannot be used
+to encrypt but may still decrypt.
 
-  - **cipher\_preferences** *policy*  
-    Select the set of allowed ciphers and their preferences, via the
-    *policy*, which is a security policy string as understood by s2n,
-    like “default\_tls13” or “20230317”.
+**cipher_preferences** *policy*  
+Select the set of allowed ciphers and their preferences, via the
+*policy*, which is a security policy string as understood by s2n, like
+“default_tls13” or “20230317”.
 
 ## EXAMPLES
 
@@ -102,6 +105,11 @@ set sock    [socket www.google.com 443]
 s2n::push $sock -servername www.google.com
 chan configure $sock -buffering none -translation crlf -encoding ascii
 puts $sock "GET / HTTP/1.1\nHost: www.google.com\nConnection: close\n"
+while {[set line [gets $sock]; string length $line]} {
+    puts $line
+}
+puts ""
+chan configure $sock -translation binary
 puts [read $sock]
 close $sock
 ```
@@ -119,13 +127,13 @@ support 8.6.
 ### From a Release Tarball
 
 Download and extract [the
-release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.5.1/tcl-s2n-0.5.1.tar.gz),
+release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz),
 then build in the standard TEA way:
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.5.1/tcl-s2n-0.5.1.tar.gz
-tar xf tcl-s2n-0.5.1.tar.gz
-cd tcl-s2n-0.5.1
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz
+tar xf tcl-s2n-0.6.0.tar.gz
+cd tcl-s2n-0.6.0
 ./configure
 make
 sudo make install
@@ -153,15 +161,15 @@ and strip debug symbols, minimising image size:
 
 ``` dockerfile
 WORKDIR /tmp/tcl-s2n
-RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.5.1/tcl-s2n-0.5.1.tar.gz -O - | tar xz --strip-components=1 && \
+RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz -O - | tar xz --strip-components=1 && \
     ./configure; make test install-binaries install-libraries && \
     strip /usr/local/lib/libs2n*.so && \
     cd .. && rm -rf tcl-s2n
 ```
 
-For any of the build methods you may need to pass `--with-tcl
-/path/to/tcl/lib` to `configure` if your Tcl install is somewhere
-nonstandard.
+For any of the build methods you may need to pass
+`--with-tcl /path/to/tcl/lib` to `configure` if your Tcl install is
+somewhere nonstandard.
 
 ### Testing
 
@@ -198,7 +206,7 @@ The s2n-tls library uses mlock by default to prevent memory containing
 key material from being paged to disk (where it could leak to other
 processes or be recovered by a later forensic analysis of the disk).
 Unfortunately containers default to removing the needed capability to
-allow that (IPC\_LOCK). That manifests as an error thrown during s2n
+allow that (IPC_LOCK). That manifests as an error thrown during s2n
 initialisation:
 
 ``` sh
@@ -212,24 +220,24 @@ tclsh8.7 [/here]
 ```
 
 If you need to use this package in a container and are able to modify
-the capabilities then granting the IPC\_LOCK capability will permit s2n
+the capabilities then granting the IPC_LOCK capability will permit s2n
 to use mlock. For example, using docker that looks like this:
 
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.5.1
+0.6.0
 tclsh8.7 [/here] 
 ```
 
-If you cannot add the IPC\_LOCK capability then s2n’s use of mlock can
-be disabled by setting the S2N\_DONT\_MLOCK environment variable (at the
-cost of losing the mlock protection for key material):
+If you cannot add the IPC_LOCK capability then s2n’s use of mlock can be
+disabled by setting the S2N_DONT_MLOCK environment variable (at the cost
+of losing the mlock protection for key material):
 
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.5.1
+0.6.0
 tclsh8.7 [/here]
 ```
 
@@ -256,9 +264,9 @@ This is a very early work in progress, but is in limited production use.
 With the nature of this package a lot of care is taken with memory
 handling and test coverage. There are no known memory leaks or errors,
 and the package is routinely tested by running its test suite (which
-aims at full coverage) through valgrind. The `make valgrind`, `make
-test` and `make coverage` build targets support these goals. The test
-suite is currently a long way from full coverage.
+aims at full coverage) through valgrind. The `make valgrind`,
+`make test` and `make coverage` build targets support these goals. The
+test suite is currently a long way from full coverage.
 
 ## BUGS
 

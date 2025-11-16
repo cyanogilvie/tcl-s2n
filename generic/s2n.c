@@ -818,7 +818,7 @@ static void free_s2n_config_intrep(Tcl_Obj* obj) //<<<
 //>>>
 static void dup_s2n_config_intrep(Tcl_Obj* src, Tcl_Obj* dst) //<<<
 {
-	int	len;
+	Tcl_Size	len;
 	const char*	str = Tcl_GetStringFromObj(src, &len);
 	Tcl_InitStringRep(dst, str, len);
 }
@@ -868,7 +868,7 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 				case CONFIG_TICKET_LIFETIME:
 				{
 					Tcl_Obj**	ov;
-					int			oc;
+					Tcl_Size	oc;
 					Tcl_WideInt	lifetime;
 
 					TEST_OK_LABEL(finally, code, Tcl_ListObjGetElements(interp, val, &oc, &ov));
@@ -1156,11 +1156,11 @@ OBJCMD(socket_cmd) //<<<
 	con_cx->s2n_con = s2n_connection_new(S2N_CLIENT);
 	CLOGS(LIFECYCLE, "Created s2n connection: %s", S2N_CON_NAME(con_cx->s2n_con));
 
-	int			host_len;
+	Tcl_Size	host_len;
 	const char*	host = Tcl_GetStringFromObj(objv[A_HOST], &host_len);
 	if (host_len == 0) {
 		// UDS mode: port is a path
-		int			pathlen;
+		Tcl_Size	pathlen;
 		const char* path	= Tcl_GetStringFromObj(objv[A_PORT], &pathlen);
 
 		if ((size_t)pathlen > sizeof(uds.sun_path)-1)

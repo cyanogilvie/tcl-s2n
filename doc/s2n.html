@@ -5,17 +5,169 @@
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <meta name="author" content="Cyan Ogilvie" />
-  <title>s2n(3) 0.5.1 | s2n Tcl wrapper</title>
+  <title>s2n(3) 0.6.0 | s2n Tcl wrapper</title>
   <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
     code{white-space: pre-wrap;}
     span.smallcaps{font-variant: small-caps;}
-    span.underline{text-decoration: underline;}
-    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
     div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
-    ul.task-list{list-style: none;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span { line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
     div.sourceCode { margin: 1em 0; }
     pre.sourceCode { margin: 0; }
@@ -50,7 +202,7 @@
     code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
     code span.at { color: #7d9029; } /* Attribute */
     code span.bn { color: #40a070; } /* BaseN */
-    code span.bu { } /* BuiltIn */
+    code span.bu { color: #008000; } /* BuiltIn */
     code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
     code span.ch { color: #4070a0; } /* Char */
     code span.cn { color: #880000; } /* Constant */
@@ -63,7 +215,7 @@
     code span.ex { } /* Extension */
     code span.fl { color: #40a070; } /* Float */
     code span.fu { color: #06287e; } /* Function */
-    code span.im { } /* Import */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
     code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
     code span.kw { color: #007020; font-weight: bold; } /* Keyword */
     code span.op { color: #666666; } /* Operator */
@@ -96,133 +248,260 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">s2n(3) 0.5.1 | s2n Tcl wrapper</h1>
+<h1 class="title">s2n(3) 0.6.0 | s2n Tcl wrapper</h1>
 <p class="author">Cyan Ogilvie</p>
 </header>
 <h1 id="s2n">S2N</h1>
 <p>s2n Tcl wrapper - layer TLS onto Tcl channels</p>
 <h2 id="synopsis">SYNOPSIS</h2>
-<p><strong>package require s2n</strong> ?0.5.1?</p>
-<p><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?<br />
-<strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …? <em>host</em> <em>port</em></p>
+<p><strong>package require s2n</strong> ?0.6.0?</p>
+<p><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em>
+<em>val</em> …?<br />
+<strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …?
+<em>host</em> <em>port</em></p>
 <h2 id="description">DESCRIPTION</h2>
-<p>This package provides a channel driver that can be stacked on any Tcl channel that supports reading and writing to add TLS support. The TLS implementation uses Amazon’s s2n for the TLS implementation and aws-lc for the libcrypto implementation.</p>
+<p>This package provides a channel driver that can be stacked on any Tcl
+channel that supports reading and writing to add TLS support. The TLS
+implementation uses Amazon’s s2n for the TLS implementation and aws-lc
+for the libcrypto implementation.</p>
 <h2 id="commands">COMMANDS</h2>
 <dl>
-<dt><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em> <em>val</em> …?</dt>
-<dd><p>Stack a TLS protocol driver onto the channel <em>channelName</em>. See <strong>OPTIONS</strong> for the allowed options. The TLS protocol driver may be removed with the standard <strong>chan pop</strong> <em>channelName</em> Tcl command. The <em>channelName</em> channel may be blocking or non-blocking, and may be a socket created with <strong>-async</strong> and still be waiting for the connection to complete.</p>
+<dt><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em>
+<em>val</em> …?</dt>
+<dd>
+<p>Stack a TLS protocol driver onto the channel <em>channelName</em>.
+See <strong>OPTIONS</strong> for the allowed options. The TLS protocol
+driver may be removed with the standard <strong>chan pop</strong>
+<em>channelName</em> Tcl command. The <em>channelName</em> channel may
+be blocking or non-blocking, and may be a socket created with
+<strong>-async</strong> and still be waiting for the connection to
+complete.</p>
 </dd>
-<dt><strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …? <em>host</em> <em>port</em></dt>
-<dd><p>Open a TCP connection to <em>host</em>:<em>port</em> and handshake with that host as a TLS client. See <strong>OPTIONS</strong> for the available options. If <em>host</em> is not a numeric address (IPv4 or IPv6) then it supplies the default for the <strong>-servername</strong> option. If <em>host</em> is given as an empty string, then <em>port</em> is taken to be a filesystem path and a connection is made to an AF_UNIX socket at that path.</p>
+<dt><strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …?
+<em>host</em> <em>port</em></dt>
+<dd>
+<p>Open a TCP connection to <em>host</em>:<em>port</em> and handshake
+with that host as a TLS client. See <strong>OPTIONS</strong> for the
+available options. If <em>host</em> is not a numeric address (IPv4 or
+IPv6) then it supplies the default for the <strong>-servername</strong>
+option. If <em>host</em> is given as an empty string, then <em>port</em>
+is taken to be a filesystem path and a connection is made to an AF_UNIX
+socket at that path.</p>
 </dd>
 </dl>
 <h2 id="options">OPTIONS</h2>
 <dl>
 <dt><strong>-config</strong> <em>config</em></dt>
-<dd><p>Override the default configuration for the channel, see <strong>CONFIG</strong> for details.</p>
+<dd>
+<p>Override the default configuration for the channel, see
+<strong>CONFIG</strong> for details.</p>
 </dd>
-<dt><strong>-role</strong> <strong>client</strong>|<strong>server</strong></dt>
-<dd><p>Set the role the TLS driver will play in the TLS handshake. If <strong>client</strong> (the default) the driver will initiate a TLS handshake otherwise it will wait to receive a ClientHello TLS message and handshake as a server. Only valid as an option to the <strong>s2n::push</strong> command, sockets opened using <strong>s2n::socket</strong> area always clients.</p>
+<dt><strong>-role</strong>
+<strong>client</strong>|<strong>server</strong></dt>
+<dd>
+<p>Set the role the TLS driver will play in the TLS handshake. If
+<strong>client</strong> (the default) the driver will initiate a TLS
+handshake otherwise it will wait to receive a ClientHello TLS message
+and handshake as a server. Only valid as an option to the
+<strong>s2n::push</strong> command, sockets opened using
+<strong>s2n::socket</strong> area always clients.</p>
 </dd>
 <dt><strong>-servername</strong> <em>host</em></dt>
-<dd><p>Set the SNI (Server Name Indication) name to send when handshaking as a client. There is no default, if not present, the SNI extension won’t be used. It’s also an error to set this option for server connections.</p>
+<dd>
+<p>Set the SNI (Server Name Indication) name to send when handshaking as
+a client. There is no default, if not present, the SNI extension won’t
+be used. It’s also an error to set this option for server
+connections.</p>
 </dd>
-<dt><strong>-prefer</strong> <strong>throughput</strong>|<strong>latency</strong></dt>
-<dd><p>Tune the implementation to optimise for throughput (large frames, fewer syscalls) or latency (smaller frames, more syscalls). TODO: figure out the default.</p>
+<dt><strong>-prefer</strong>
+<strong>throughput</strong>|<strong>latency</strong></dt>
+<dd>
+<p>Tune the implementation to optimise for throughput (large frames,
+fewer syscalls) or latency (smaller frames, more syscalls). TODO: figure
+out the default.</p>
 </dd>
 <dt><strong>-async</strong></dt>
-<dd><p>Only valid for <strong>s2n::socket</strong>: don’t block on establishing the connection to <em>host</em>:<em>port</em>, but return immediately. If data is written in blocking mode before the connection is established and the TLS handshake is completed then the write will block until these are done and the data is written. In non-blocking mode the channel will become writable when the TLS handshake completes, and readable once application data arrives from the peer.</p>
+<dd>
+<p>Only valid for <strong>s2n::socket</strong>: don’t block on
+establishing the connection to <em>host</em>:<em>port</em>, but return
+immediately. If data is written in blocking mode before the connection
+is established and the TLS handshake is completed then the write will
+block until these are done and the data is written. In non-blocking mode
+the channel will become writable when the TLS handshake completes, and
+readable once application data arrives from the peer.</p>
 </dd>
 </dl>
 <h2 id="config">CONFIG</h2>
-<p>The <em>config</em> dictionary can contain the following keys to override the default configuration for the connection. An error will be thrown if the dictionary contains any unrecognised keys.</p>
+<p>The <em>config</em> dictionary can contain the following keys to
+override the default configuration for the connection. An error will be
+thrown if the dictionary contains any unrecognised keys.</p>
 <dl>
 <dt><strong>session_tickets</strong> <em>bool</em></dt>
-<dd><p>If set to a true boolean value, enable session tickets for this connection. Session tickets are a way to bootstrap future connections with a server without going through the full certificate-based key exchange, enabling lower latency connection establishment.</p>
+<dd>
+<p>If set to a true boolean value, enable session tickets for this
+connection. Session tickets are a way to bootstrap future connections
+with a server without going through the full certificate-based key
+exchange, enabling lower latency connection establishment.</p>
 </dd>
-<dt><strong>ticket_lifetime</strong> {<em>encrypt_decrypt_seconds</em> <em>decrypt_only_seconds</em>}</dt>
-<dd><p>Set the time for which session tickets are valid, as a list of two values. The first, <em>encrypt_decrypt_seconds</em> is the time for which the ticket may be used to both encrypt and decrypt. The second, <em>decrypt_only_seconds</em>, is the time during which the key cannot be used to encrypt but may still decrypt.</p>
+<dt><strong>ticket_lifetime</strong> {<em>encrypt_decrypt_seconds</em>
+<em>decrypt_only_seconds</em>}</dt>
+<dd>
+<p>Set the time for which session tickets are valid, as a list of two
+values. The first, <em>encrypt_decrypt_seconds</em> is the time for
+which the ticket may be used to both encrypt and decrypt. The second,
+<em>decrypt_only_seconds</em>, is the time during which the key cannot
+be used to encrypt but may still decrypt.</p>
 </dd>
 <dt><strong>cipher_preferences</strong> <em>policy</em></dt>
-<dd><p>Select the set of allowed ciphers and their preferences, via the <em>policy</em>, which is a security policy string as understood by s2n, like “default_tls13” or “20230317”.</p>
+<dd>
+<p>Select the set of allowed ciphers and their preferences, via the
+<em>policy</em>, which is a security policy string as understood by s2n,
+like “default_tls13” or “20230317”.</p>
 </dd>
 </dl>
 <h2 id="examples">EXAMPLES</h2>
 <p>Connect to an HTTPS server, request /</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode tcl"><code class="sourceCode tcl"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true"></a><span class="kw">set</span> sock    <span class="kw">[socket</span> www.google.com <span class="dv">443</span><span class="kw">]</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true"></a>s2n::push <span class="dt">$sock</span><span class="ot"> -servername</span> www.google.com</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true"></a><span class="kw">chan</span> <span class="ot">configure</span> <span class="dt">$sock</span><span class="ot"> -buffering</span> none<span class="ot"> -translation</span> crlf<span class="ot"> -encoding</span> ascii</span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true"></a><span class="kw">puts</span> <span class="dt">$sock</span> <span class="st">&quot;GET / HTTP/1.1</span><span class="ch">\n</span><span class="st">Host: www.google.com</span><span class="ch">\n</span><span class="st">Connection: close</span><span class="ch">\n</span><span class="st">&quot;</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true"></a><span class="kw">puts</span> <span class="kw">[read</span> <span class="dt">$sock</span><span class="kw">]</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true"></a><span class="kw">close</span> <span class="dt">$sock</span></span></code></pre></div>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode tcl"><code class="sourceCode tcl"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">set</span> sock    <span class="kw">[socket</span> www.google.com <span class="dv">443</span><span class="kw">]</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>s2n::push <span class="dt">$sock</span><span class="ot"> -servername</span> www.google.com</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">chan</span> <span class="ot">configure</span> <span class="dt">$sock</span><span class="ot"> -buffering</span> none<span class="ot"> -translation</span> crlf<span class="ot"> -encoding</span> ascii</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">puts</span> <span class="dt">$sock</span> <span class="st">&quot;GET / HTTP/1.1</span><span class="ch">\n</span><span class="st">Host: www.google.com</span><span class="ch">\n</span><span class="st">Connection: close</span><span class="ch">\n</span><span class="st">&quot;</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="kw">while</span> <span class="kw">{[set</span> line <span class="kw">[gets</span> <span class="dt">$sock</span><span class="kw">]</span>; <span class="kw">string</span> <span class="ot">length</span> <span class="dt">$line</span><span class="kw">]}</span> <span class="kw">{</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">puts</span> <span class="dt">$line</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="kw">}</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="kw">puts</span> <span class="st">&quot;&quot;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="kw">chan</span> <span class="ot">configure</span> <span class="dt">$sock</span><span class="ot"> -translation</span> <span class="kw">binary</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="kw">puts</span> <span class="kw">[read</span> <span class="dt">$sock</span><span class="kw">]</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="kw">close</span> <span class="dt">$sock</span></span></code></pre></div>
 <h2 id="building">BUILDING</h2>
-<p>This package has no external dependencies other than Tcl. The s2n and aws-lc libraries it depends on are included as submodules (or baked into the release tarball) and are built and statically linked as part of the package build process.</p>
-<p>Currently Tcl 8.7 is required, but if needed polyfills could be built to support 8.6.</p>
+<p>This package has no external dependencies other than Tcl. The s2n and
+aws-lc libraries it depends on are included as submodules (or baked into
+the release tarball) and are built and statically linked as part of the
+package build process.</p>
+<p>Currently Tcl 8.7 is required, but if needed polyfills could be built
+to support 8.6.</p>
 <h3 id="from-a-release-tarball">From a Release Tarball</h3>
-<p>Download and extract <a href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.5.1/tcl-s2n-0.5.1.tar.gz">the release</a>, then build in the standard TEA way:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.5.1/tcl-s2n-0.5.1.tar.gz</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a><span class="fu">tar</span> xf tcl-s2n-0.5.1.tar.gz</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true"></a><span class="bu">cd</span> tcl-s2n-0.5.1</span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true"></a><span class="ex">./configure</span></span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true"></a><span class="fu">make</span></span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true"></a><span class="fu">sudo</span> make install</span></code></pre></div>
+<p>Download and extract <a
+href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz">the
+release</a>, then build in the standard TEA way:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">tar</span> xf tcl-s2n-0.6.0.tar.gz</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> tcl-s2n-0.6.0</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./configure</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> make install</span></code></pre></div>
 <h3 id="from-the-git-sources">From the Git Sources</h3>
-<p>Fetch <a href="https://github.com/cyanogilvie/tcl-s2n">the code</a> and submodules recursively, then build in the standard autoconf / TEA way:</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true"></a><span class="fu">git</span> clone --recurse-submodules https://github.com/cyanogilvie/tcl-s2n</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true"></a><span class="bu">cd</span> tcl-s2n</span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true"></a><span class="fu">autoconf</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true"></a><span class="ex">./configure</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true"></a><span class="fu">make</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true"></a><span class="fu">sudo</span> make install</span></code></pre></div>
+<p>Fetch <a href="https://github.com/cyanogilvie/tcl-s2n">the code</a>
+and submodules recursively, then build in the standard autoconf / TEA
+way:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--recurse-submodules</span> https://github.com/cyanogilvie/tcl-s2n</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> tcl-s2n</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="fu">autoconf</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./configure</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> make install</span></code></pre></div>
 <h3 id="in-a-docker-build">In a Docker Build</h3>
-<p>Build from a specified release version, avoiding layer pollution and only adding the installed package without documentation to the image, and strip debug symbols, minimising image size:</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode dockerfile"><code class="sourceCode dockerfile"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="kw">WORKDIR</span> /tmp/tcl-s2n</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="kw">RUN</span> wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.5.1/tcl-s2n-0.5.1.tar.gz -O - | tar xz --strip-components=1 &amp;&amp; \</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true"></a>    ./configure; make test install-binaries install-libraries &amp;&amp; \</span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true"></a>    strip /usr/local/lib/libs2n*.so &amp;&amp; \</span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true"></a>    cd .. &amp;&amp; rm -rf tcl-s2n</span></code></pre></div>
-<p>For any of the build methods you may need to pass <code>--with-tcl /path/to/tcl/lib</code> to <code>configure</code> if your Tcl install is somewhere nonstandard.</p>
+<p>Build from a specified release version, avoiding layer pollution and
+only adding the installed package without documentation to the image,
+and strip debug symbols, minimising image size:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode dockerfile"><code class="sourceCode dockerfile"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">WORKDIR</span> /tmp/tcl-s2n</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">RUN</span> <span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz <span class="at">-O</span> <span class="at">-</span> <span class="kw">|</span> <span class="fu">tar</span> xz <span class="at">--strip-components</span><span class="op">=</span>1 <span class="kw">&amp;&amp;</span> <span class="dt">\</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    <span class="ex">./configure</span><span class="kw">;</span> <span class="fu">make</span> test install-binaries install-libraries <span class="kw">&amp;&amp;</span> <span class="dt">\</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">strip</span> /usr/local/lib/libs2n<span class="pp">*</span>.so <span class="kw">&amp;&amp;</span> <span class="dt">\</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="bu">cd</span> .. <span class="kw">&amp;&amp;</span> <span class="fu">rm</span> <span class="at">-rf</span> tcl-s2n</span></code></pre></div>
+<p>For any of the build methods you may need to pass
+<code>--with-tcl /path/to/tcl/lib</code> to <code>configure</code> if
+your Tcl install is somewhere nonstandard.</p>
 <h3 id="testing">Testing</h3>
-<p>Since this package deals with security sensitive code, it’s a good idea to run the test suite after building (especially in any automated build or CI/CD pipeline):</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true"></a><span class="fu">make</span> test</span></code></pre></div>
-<p>And maybe also the memory checker <code>valgrind</code> (requires that Tcl and this package are built with suitable memory debugging flags, like <code>CFLAGS="-DPURIFY -Og" --enable-symbols</code>):</p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true"></a><span class="fu">make</span> valgrind</span></code></pre></div>
+<p>Since this package deals with security sensitive code, it’s a good
+idea to run the test suite after building (especially in any automated
+build or CI/CD pipeline):</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> test</span></code></pre></div>
+<p>And maybe also the memory checker <code>valgrind</code> (requires
+that Tcl and this package are built with suitable memory debugging
+flags, like <code>CFLAGS="-DPURIFY -Og" --enable-symbols</code>):</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> valgrind</span></code></pre></div>
 <h2 id="security">SECURITY</h2>
-<p>Given the limitations of a scripting language environment, this package’s code does not have sufficient control over freed memory contents (or memory paged to disk) to guarantee that key material or other sensitive material (like decrypted messages) can’t leak in a way that could be exploited by other code running on the shared memory (or disk) machine. For this reason, careful consideration should be given to the security requirements of the application as a whole when using this package in a shared execution context, or in a virtual machine.</p>
+<p>Given the limitations of a scripting language environment, this
+package’s code does not have sufficient control over freed memory
+contents (or memory paged to disk) to guarantee that key material or
+other sensitive material (like decrypted messages) can’t leak in a way
+that could be exploited by other code running on the shared memory (or
+disk) machine. For this reason, careful consideration should be given to
+the security requirements of the application as a whole when using this
+package in a shared execution context, or in a virtual machine.</p>
 <h2 id="mlock-considerations">MLOCK CONSIDERATIONS</h2>
-<p>The s2n-tls library uses mlock by default to prevent memory containing key material from being paged to disk (where it could leak to other processes or be recovered by a later forensic analysis of the disk). Unfortunately containers default to removing the needed capability to allow that (IPC_LOCK). That manifests as an error thrown during s2n initialisation:</p>
-<div class="sourceCode" id="cb7"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true"></a><span class="ex">%</span> docker run --rm -it cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] package require s2n</span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true"></a><span class="ex">s2n_init</span> failed: error calling mlock (Did you run prlimit?)</span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true"></a><span class="kw">while</span> <span class="ex">evaluating</span> package require s2n</span>
-<span id="cb7-5"><a href="#cb7-5" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] set errorCode</span>
-<span id="cb7-6"><a href="#cb7-6" aria-hidden="true"></a><span class="ex">S2N</span> S2N_ERR_MLOCK</span>
-<span id="cb7-7"><a href="#cb7-7" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here]</span></code></pre></div>
-<p>If you need to use this package in a container and are able to modify the capabilities then granting the IPC_LOCK capability will permit s2n to use mlock. For example, using docker that looks like this:</p>
-<div class="sourceCode" id="cb8"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true"></a><span class="ex">%</span> docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] package require s2n</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true"></a><span class="ex">0.5.1</span></span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] </span></code></pre></div>
-<p>If you cannot add the IPC_LOCK capability then s2n’s use of mlock can be disabled by setting the S2N_DONT_MLOCK environment variable (at the cost of losing the mlock protection for key material):</p>
-<div class="sourceCode" id="cb9"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true"></a><span class="ex">%</span> docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here] package require s2n</span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true"></a><span class="ex">0.5.1</span></span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true"></a><span class="ex">tclsh8.7</span> [/here]</span></code></pre></div>
+<p>The s2n-tls library uses mlock by default to prevent memory
+containing key material from being paged to disk (where it could leak to
+other processes or be recovered by a later forensic analysis of the
+disk). Unfortunately containers default to removing the needed
+capability to allow that (IPC_LOCK). That manifests as an error thrown
+during s2n initialisation:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">%</span> docker run <span class="at">--rm</span> <span class="at">-it</span> cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> package require s2n</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="ex">s2n_init</span> failed: error calling mlock <span class="er">(</span><span class="ex">Did</span> you run prlimit<span class="pp">?</span><span class="kw">)</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="cf">while</span> <span class="ex">evaluating</span> package require s2n</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> set errorCode</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="ex">S2N</span> S2N_ERR_MLOCK</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span></span></code></pre></div>
+<p>If you need to use this package in a container and are able to modify
+the capabilities then granting the IPC_LOCK capability will permit s2n
+to use mlock. For example, using docker that looks like this:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">%</span> docker run <span class="at">--rm</span> <span class="at">-it</span> <span class="at">--cap-add</span> IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> package require s2n</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="ex">0.6.0</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> </span></code></pre></div>
+<p>If you cannot add the IPC_LOCK capability then s2n’s use of mlock can
+be disabled by setting the S2N_DONT_MLOCK environment variable (at the
+cost of losing the mlock protection for key material):</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">%</span> docker run <span class="at">--rm</span> <span class="at">-it</span> <span class="at">-e</span> S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> package require s2n</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="ex">0.6.0</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span></span></code></pre></div>
 <h2 id="fuzzing">FUZZING</h2>
 <p>TODO</p>
 <h2 id="available-in">AVAILABLE IN</h2>
-<p>The most recent release of this package is available by default in the <code>alpine-tcl</code> container image: docker.io/cyanogilvie/alpine-tcl and the <code>cftcl</code> Tcl runtime snap: <a href="https://github.com/cyanogilvie/cftcl" class="uri">https://github.com/cyanogilvie/cftcl</a>.</p>
+<p>The most recent release of this package is available by default in
+the <code>alpine-tcl</code> container image:
+docker.io/cyanogilvie/alpine-tcl and the <code>cftcl</code> Tcl runtime
+snap: <a href="https://github.com/cyanogilvie/cftcl"
+class="uri">https://github.com/cyanogilvie/cftcl</a>.</p>
 <h2 id="see-also">SEE ALSO</h2>
-<p>This package is built on the <a href="https://github.com/aws/s2n-tls">s2n library</a> and the <a href="https://github.com/aws/aws-lc">aws-lc library</a>.</p>
+<p>This package is built on the <a
+href="https://github.com/aws/s2n-tls">s2n library</a> and the <a
+href="https://github.com/aws/aws-lc">aws-lc library</a>.</p>
 <h2 id="project-status">PROJECT STATUS</h2>
-<p>This is a very early work in progress, but is in limited production use.</p>
-<p>With the nature of this package a lot of care is taken with memory handling and test coverage. There are no known memory leaks or errors, and the package is routinely tested by running its test suite (which aims at full coverage) through valgrind. The <code>make valgrind</code>, <code>make test</code> and <code>make coverage</code> build targets support these goals. The test suite is currently a long way from full coverage.</p>
+<p>This is a very early work in progress, but is in limited production
+use.</p>
+<p>With the nature of this package a lot of care is taken with memory
+handling and test coverage. There are no known memory leaks or errors,
+and the package is routinely tested by running its test suite (which
+aims at full coverage) through valgrind. The <code>make valgrind</code>,
+<code>make test</code> and <code>make coverage</code> build targets
+support these goals. The test suite is currently a long way from full
+coverage.</p>
 <h2 id="bugs">BUGS</h2>
-<p>There are currently problems with the <strong>s2n::socket</strong> command in <strong>-async</strong> mode, and handling of orphaned channels created by <strong>s2n::socket</strong> during process exit or unloading this extension’s dll, for now it is recommended to use the stacked channel approach with <strong>s2n::push</strong> instead.</p>
+<p>There are currently problems with the <strong>s2n::socket</strong>
+command in <strong>-async</strong> mode, and handling of orphaned
+channels created by <strong>s2n::socket</strong> during process exit or
+unloading this extension’s dll, for now it is recommended to use the
+stacked channel approach with <strong>s2n::push</strong> instead.</p>
 <h2 id="source-code">SOURCE CODE</h2>
-<p>This package’s source code is available at <a href="https://github.com/cyanogilvie/tcl-s2n" class="uri">https://github.com/cyanogilvie/tcl-s2n</a>. Please create issues there for any bugs discovered.</p>
+<p>This package’s source code is available at <a
+href="https://github.com/cyanogilvie/tcl-s2n"
+class="uri">https://github.com/cyanogilvie/tcl-s2n</a>. Please create
+issues there for any bugs discovered.</p>
 <h2 id="license">LICENSE</h2>
-<p>This package is placed in the public domain: the author disclaims copyright and liability to the extent allowed by law. For those jurisdictions that limit an author’s ability to disclaim copyright this package can be used under the terms of the CC0, BSD, or MIT licenses. No attribution, permission or fees are required to use this for whatever you like, commercial or otherwise, though I would urge its users to do good and not evil to the world.</p>
-<p>The s2n and aws-lc submodules are not public domain and have their own licenses, consult the LICENSE files in each project for the details.</p>
+<p>This package is placed in the public domain: the author disclaims
+copyright and liability to the extent allowed by law. For those
+jurisdictions that limit an author’s ability to disclaim copyright this
+package can be used under the terms of the CC0, BSD, or MIT licenses. No
+attribution, permission or fees are required to use this for whatever
+you like, commercial or otherwise, though I would urge its users to do
+good and not evil to the world.</p>
+<p>The s2n and aws-lc submodules are not public domain and have their
+own licenses, consult the LICENSE files in each project for the
+details.</p>
 </body>
 </html>

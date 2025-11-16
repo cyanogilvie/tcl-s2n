@@ -111,6 +111,11 @@ set sock    [socket www.google.com 443]
 s2n::push $sock -servername www.google.com
 chan configure $sock -buffering none -translation crlf -encoding ascii
 puts $sock "GET / HTTP/1.1\nHost: www.google.com\nConnection: close\n"
+while {[set line [gets $sock]; string length $line]} {
+    puts $line
+}
+puts ""
+chan configure $sock -translation binary
 puts [read $sock]
 close $sock
 ~~~

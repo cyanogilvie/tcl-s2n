@@ -178,8 +178,6 @@ VALGRINDARGS	= --tool=memcheck --num-callers=8 --leak-resolution=high \
 
 S2N_BUILD_MODE = Release
 
-.SUFFIXES: .c .$(OBJEXT)
-
 #========================================================================
 # Start of user-definable TARGETS section
 #========================================================================
@@ -264,7 +262,7 @@ install-doc: doc
 test: binaries libraries
 	$(TCLSH) `@CYGPATH@ $(srcdir)/tests/all.tcl` $(TESTFLAGS) \
 	    -load "package ifneeded $(PACKAGE_NAME) $(PACKAGE_VERSION) \
-		[list load `@CYGPATH@ $(PKG_LIB_FILE)` $(PACKAGE_NAME)]"
+		[list load `@CYGPATH@ $(PKG_LIB_FILE)` [string totitle $(PACKAGE_NAME)]]"
 
 shell: binaries libraries
 	@$(TCLSH) $(SCRIPT)
@@ -277,7 +275,7 @@ gdb-test: binaries libraries
 	    --args $(TCLSH_PROG) `@CYGPATH@ $(srcdir)/tests/all.tcl` \
 	    $(TESTFLAGS) -singleproc 1 \
 	    -load "package ifneeded $(PACKAGE_NAME) $(PACKAGE_VERSION) \
-		[list load `@CYGPATH@ $(PKG_LIB_FILE)` $(PACKAGE_NAME)]"
+		[list load `@CYGPATH@ $(PKG_LIB_FILE)` [string totitle $(PACKAGE_NAME)]]"
 
 valgrind: binaries libraries
 	$(TCLSH_ENV) $(PKG_ENV) $(VALGRIND) $(VALGRINDARGS) $(TCLSH_PROG) \
@@ -325,7 +323,7 @@ $(PKG_STUB_LIB_FILE): $(PKG_STUB_OBJECTS)
 
 VPATH = $(srcdir):$(srcdir)/generic:$(srcdir)/unix:$(srcdir)/win:$(srcdir)/macosx
 
-.c.@OBJEXT@:
+%.@OBJEXT@: %.c deps
 	$(COMPILE) -c `@CYGPATH@ $<` -o $@
 
 #========================================================================
@@ -412,6 +410,7 @@ clean:
 	#-rm -rf build
 
 deps-clean:
+	-rm -rf build
 
 distclean: clean
 	-rm -f *.tab.c
@@ -507,7 +506,7 @@ local/lib/libs2n.a:
 			-DCMAKE_INSTALL_LIBDIR=$(top_builddir)/local/lib \
 			-DCMAKE_INSTALL_INCLUDEDIR=$(top_builddir)/local/include \
 			-DCMAKE_INSTALL_BINDIR=$(top_builddir)/local/bin && \
-		cmake --build $(top_builddir)/build/aws-lc -j 8 && \
+		cmake --build $(top_builddir)/build/aws-lc -j 20 && \
 		cmake --install $(top_builddir)/build/aws-lc
 	sed --in-place -e "s%_IMPORT_PREFIX \"/usr/local\"%_IMPORT_PREFIX \"$(top_builddir)/local\"%" $(top_builddir)/local/lib/crypto/cmake/static/crypto-targets.cmake   # TODO: figure out how to do this in correctly
 	cd $(srcdir)/deps/s2n-tls && \
@@ -519,7 +518,7 @@ local/lib/libs2n.a:
 			-DCMAKE_BUILD_TYPE=$(S2N_BUILD_MODE) \
 			-DCMAKE_PREFIX_PATH=$(top_builddir)/local \
 			-DCMAKE_INSTALL_PREFIX=$(top_builddir)/local && \
-		cmake --build $(top_builddir)/build/s2n-tls -j 8 && \
+		cmake --build $(top_builddir)/build/s2n-tls -j 20 && \
 		cmake --install $(top_builddir)/build/s2n-tls
 
 local/lib/libclogs.a: deps/clogs/*.c deps/clogs/*.h deps/clogs/*.def deps/clogs/Makefile
