@@ -1,16 +1,10 @@
----
-author:
-- Cyan Ogilvie
-title: s2n(3) 0.7.0 \| s2n Tcl wrapper
----
-
 # S2N
 
 s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.7.0?
+**package require s2n** ?0.7.1?
 
 **s2n::push** *channelName* ?*-opt* *val* …?  
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -116,33 +110,76 @@ close $sock
 
 ## BUILDING
 
-This package has no external dependencies other than Tcl. The s2n and
+This package needs Tcl 9.0 or 8.6 (or newer in either line). The s2n and
 aws-lc libraries it depends on are included as submodules (or baked into
 the release tarball) and are built and statically linked as part of the
-package build process.
+package build process — no other external dependencies.
 
-Currently Tcl 8.7 is required, but if needed polyfills could be built to
-support 8.6.
+The package supports two build systems: **meson** (preferred) and the
+legacy **autotools** path. The autotools build is in maintenance mode
+and will be removed in a future release; new features and CI run
+primarily against meson. The two paths produce identical binaries.
 
-### From a Release Tarball
+### Meson (preferred)
 
-Download and extract [the
-release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz),
-then build in the standard TEA way:
+Meson and ninja need to be available on the build host. Most
+distributions package them:
+e.g. `apt install meson ninja-build cmake pandoc` on Debian/Ubuntu
+(cmake is needed for the interned aws-lc / s2n-tls deps; pandoc is
+optional and only needed if you want to (re)generate the manpage and
+README).
+
+#### From a release tarball
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz
-tar xf tcl-s2n-0.7.0.tar.gz
-cd tcl-s2n-0.7.0
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.1/s2n-0.7.1.tar.gz
+tar xf s2n-0.7.1.tar.gz
+cd s2n-0.7.1
+meson setup build
+meson compile -C build
+meson test -C build
+sudo meson install -C build
+```
+
+#### From the git sources
+
+``` sh
+git clone --recurse-submodules https://github.com/cyanogilvie/tcl-s2n
+cd tcl-s2n
+meson setup build
+meson compile -C build
+meson test -C build
+sudo meson install -C build
+```
+
+If your Tcl install is somewhere nonstandard, point pkg-config at it:
+
+``` sh
+PKG_CONFIG_PATH=/path/to/tcl/lib/pkgconfig meson setup build
+```
+
+To rebuild the interned aws-lc / s2n-tls deps from scratch (for example
+after bumping a submodule SHA):
+
+``` sh
+meson compile -C build deps-clean
+meson compile -C build
+```
+
+### Autotools (legacy)
+
+#### From a release tarball
+
+``` sh
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.1/s2n-0.7.1.tar.gz
+tar xf s2n-0.7.1.tar.gz
+cd s2n-0.7.1
 ./configure
 make
 sudo make install
 ```
 
-### From the Git Sources
-
-Fetch [the code](https://github.com/cyanogilvie/tcl-s2n) and submodules
-recursively, then build in the standard autoconf / TEA way:
+#### From the git sources
 
 ``` sh
 git clone --recurse-submodules https://github.com/cyanogilvie/tcl-s2n
@@ -153,7 +190,7 @@ make
 sudo make install
 ```
 
-### In a Docker Build
+#### In a Docker build
 
 Build from a specified release version, avoiding layer pollution and
 only adding the installed package without documentation to the image,
@@ -161,29 +198,30 @@ and strip debug symbols, minimising image size:
 
 ``` dockerfile
 WORKDIR /tmp/tcl-s2n
-RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz -O - | tar xz --strip-components=1 && \
+RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.1/s2n-0.7.1.tar.gz -O - | tar xz --strip-components=1 && \
     ./configure; make test install-binaries install-libraries && \
     strip /usr/local/lib/libs2n*.so && \
     cd .. && rm -rf tcl-s2n
 ```
 
-For any of the build methods you may need to pass
-`--with-tcl /path/to/tcl/lib` to `configure` if your Tcl install is
+Pass `--with-tcl /path/to/tcl/lib` to `configure` if your Tcl install is
 somewhere nonstandard.
 
 ### Testing
 
-Since this package deals with security sensitive code, it’s a good idea
+Since this package deals with security-sensitive code, it’s a good idea
 to run the test suite after building (especially in any automated build
 or CI/CD pipeline):
 
 ``` sh
-make test
+meson test -C build       # meson
+make test                 # autotools
 ```
 
-And maybe also the memory checker `valgrind` (requires that Tcl and this
-package are built with suitable memory debugging flags, like
-`CFLAGS="-DPURIFY -Og" --enable-symbols`):
+For deeper memory checking, run the suite under valgrind (requires that
+Tcl and this package are built with suitable memory debugging flags,
+like `CFLAGS="-DPURIFY -Og" --enable-symbols` for autotools or
+`meson setup build --buildtype=debug` for meson):
 
 ``` sh
 make valgrind
@@ -226,7 +264,7 @@ to use mlock. For example, using docker that looks like this:
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.7.0
+0.7.1
 tclsh8.7 [/here] 
 ```
 
@@ -237,7 +275,7 @@ of losing the mlock protection for key material):
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.7.0
+0.7.1
 tclsh8.7 [/here]
 ```
 

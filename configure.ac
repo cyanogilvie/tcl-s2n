@@ -19,7 +19,7 @@ dnl	to configure the system for the local environment.
 # so that we create the export library with the dll.
 #-----------------------------------------------------------------------
 
-AC_INIT([s2n], [0.7.0])
+AC_INIT([s2n], [0.7.1])
 
 #--------------------------------------------------------------------
 # Call TEA_INIT as the first TEA_ macro to set up initial vars.
@@ -78,7 +78,7 @@ ENABLE_TESTMODE
 
 TEA_ADD_SOURCES([s2n.c])
 TEA_ADD_HEADERS([])
-TEA_ADD_INCLUDES([-Ilocal/include])
+TEA_ADD_INCLUDES([-Ilocal/include -Iteabase])
 TEA_ADD_LIBS([-Llocal/lib -l:libs2n.a -l:libclogs.a])
 TEA_ADD_CFLAGS([-std=c17 -Wall -Werror -Wextra -Wno-override-init])
 TEA_ADD_STUB_SOURCES([])

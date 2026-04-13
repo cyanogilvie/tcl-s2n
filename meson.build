@@ -1,12 +1,12 @@
 project('s2n', 'c',
-  version:          '0.7.0',
+  version:          '0.7.1',
   default_options:  ['c_std=c17', 'warning_level=2', 'werror=true'],
   meson_version:    '>=1.3.0',
 )
 
 cc = meson.get_compiler('c')
 fs = import('fs')
-add_project_arguments('-D_DEFAULT_SOURCE', language: 'c')
+add_project_arguments('-DHAVE_CONFIG_H',   language: 'c')
 
 if get_option('debug')
   add_project_arguments(cc.get_supported_arguments(['-ggdb3']), language: 'c')
@@ -20,15 +20,6 @@ add_project_arguments(cc.get_supported_arguments([
 
 conf = configuration_data()
 
-# s2n.c references PACKAGE_NAME / PACKAGE_VERSION from the autotools -D
-# convention.  Supply them directly via project args here so the source
-# doesn't need a config.h include.
-add_project_arguments(
-  '-DPACKAGE_NAME="' + meson.project_name() + '"',
-  '-DPACKAGE_VERSION="' + meson.project_version() + '"',
-  language: 'c',
-)
-
 deps = []
 inc = [include_directories('generic')]
 
@@ -36,8 +27,10 @@ pkg_sources = files(
   'generic/s2n.c',
 )
 
+tea_want_shims = ['tip445']
+
 # Teabase init: provides pkg_dir, tclsh, tcl_dep, teaconf
-subdir('teabase/init')
+#subdir('teabase/init')
 
 # Interned static deps (libs2n.a + libcrypto.a) built from the
 # version-pinned submodules under deps/.  Exports interned_deps_dep.
