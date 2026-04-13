@@ -2,6 +2,23 @@
 #define _S2NINT_H
 #define _POSIX_C_SOURCE 200112L		// maybe _GNU_SOURCE?
 #include "tclstuff.h"
+
+// Polyfills for Tcl 8.6.  Tcl 8.7 puts MODULE_SCOPE in tclPlatDecls.h and
+// Tcl 9 ships Tcl_Size in tcl.h, so both checks are no-ops on those.
+#ifndef MODULE_SCOPE
+#  ifdef __cplusplus
+#    define MODULE_SCOPE extern "C"
+#  else
+#    define MODULE_SCOPE extern
+#  endif
+#endif
+#ifndef TCL_SIZE_MAX
+#  include <limits.h>
+typedef int Tcl_Size;
+#  define TCL_SIZE_MODIFIER ""
+#  define TCL_SIZE_MAX INT_MAX
+#endif
+
 #include <s2n.h>
 #include <stdint.h>
 #include <inttypes.h>

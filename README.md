@@ -1,7 +1,7 @@
 ---
 author:
 - Cyan Ogilvie
-title: s2n(3) 0.6.0 \| s2n Tcl wrapper
+title: s2n(3) 0.7.0 \| s2n Tcl wrapper
 ---
 
 # S2N
@@ -10,7 +10,7 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.6.0?
+**package require s2n** ?0.7.0?
 
 **s2n::push** *channelName* ?*-opt* *val* …?  
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -127,13 +127,13 @@ support 8.6.
 ### From a Release Tarball
 
 Download and extract [the
-release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz),
+release](https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz),
 then build in the standard TEA way:
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz
-tar xf tcl-s2n-0.6.0.tar.gz
-cd tcl-s2n-0.6.0
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz
+tar xf tcl-s2n-0.7.0.tar.gz
+cd tcl-s2n-0.7.0
 ./configure
 make
 sudo make install
@@ -161,7 +161,7 @@ and strip debug symbols, minimising image size:
 
 ``` dockerfile
 WORKDIR /tmp/tcl-s2n
-RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz -O - | tar xz --strip-components=1 && \
+RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz -O - | tar xz --strip-components=1 && \
     ./configure; make test install-binaries install-libraries && \
     strip /usr/local/lib/libs2n*.so && \
     cd .. && rm -rf tcl-s2n
@@ -226,7 +226,7 @@ to use mlock. For example, using docker that looks like this:
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.6.0
+0.7.0
 tclsh8.7 [/here] 
 ```
 
@@ -237,7 +237,7 @@ of losing the mlock protection for key material):
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.6.0
+0.7.0
 tclsh8.7 [/here]
 ```
 

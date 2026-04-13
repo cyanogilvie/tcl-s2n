@@ -16,3 +16,11 @@ local
 Makefile.teabase
 doc/.build
 build
+# meson
+/build-meson
+/doc/*.n
+/doc/s2n.md
+/subprojects/.wraplock
+/subprojects/packagecache
+/subprojects/tcl
+/subprojects/libtommath-*

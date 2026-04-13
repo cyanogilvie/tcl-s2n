@@ -9,11 +9,11 @@ static const char* lit_str[L_size] = {
 
 int g_unloading = 0;
 
-TCL_DECLARE_MUTEX(g_init_mutex);
+TCL_DECLARE_MUTEX(g_init_mutex)
 static int				g_init = 0;
 static Tcl_HashTable	g_managed_chans;
 
-TCL_DECLARE_MUTEX(g_intreps_mutex);
+TCL_DECLARE_MUTEX(g_intreps_mutex)
 static Tcl_HashTable	g_intreps;
 static int				g_intreps_init = 0;
 
@@ -67,7 +67,10 @@ static const char* action_str(int action) //<<<
 static int s2n_common_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr);
 static int s2n_common_chan_output(ClientData cdata, const char* buf, int toWrite, int* errorCodePtr);
 static int s2n_common_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags);
+#if TCL_MAJOR_VERSION < 9
 static int s2n_common_chan_seek(ClientData cdata, long offset, int mode, int* errorCodePtr);
+#endif
+static Tcl_WideInt s2n_common_chan_wide_seek(ClientData cdata, Tcl_WideInt offset, int mode, int* errorCodePtr);
 static void s2n_common_chan_thread_action(ClientData cdata, int action);
 // Common driver parts >>>
 // Stacked channel implementation <<<
@@ -89,7 +92,12 @@ Tcl_ChannelType	s2n_stacked_channel_type = {
 	.watchProc			= s2n_stacked_chan_watch,
 	.handlerProc		= s2n_stacked_chan_handler,
 	.threadActionProc	= s2n_common_chan_thread_action,
+#if TCL_MAJOR_VERSION < 9
+	// Tcl 8.6 panics if wideSeekProc is set without seekProc, even though
+	// it prefers wideSeekProc when both exist.  Tcl 9 ignores seekProc.
 	.seekProc			= s2n_common_chan_seek,
+#endif
+	.wideSeekProc		= s2n_common_chan_wide_seek,
 };
 
 static int s2n_stacked_chan_block_mode(ClientData cdata, int mode) //<<<
@@ -264,7 +272,10 @@ Tcl_ChannelType	s2n_direct_channel_type = {
 	.watchProc			= s2n_direct_chan_watch,
 	//.handlerProc		= s2n_direct_chan_handler,		// Called by Tcl_CreateFileHandler
 	.threadActionProc	= s2n_common_chan_thread_action,
+#if TCL_MAJOR_VERSION < 9
 	.seekProc			= s2n_common_chan_seek,
+#endif
+	.wideSeekProc		= s2n_common_chan_wide_seek,
 };
 
 struct s2n_direct_ev {
@@ -390,6 +401,7 @@ static void s2n_direct_chan_watch(ClientData cdata, int mask) //<<<
 //>>>
 static int s2n_direct_chan_notify(Tcl_Event* ev, int flags) //<<<
 {
+	(void)flags;
 	struct s2n_direct_ev*	s2n_ev = (struct s2n_direct_ev*)ev;
 	struct con_cx*			con_cx = s2n_ev->con_cx;
 	int						mask = s2n_ev->mask;
@@ -709,13 +721,24 @@ static void s2n_common_chan_thread_action(ClientData cdata, int action) //<<<
 }
 
 //>>>
+#if TCL_MAJOR_VERSION < 9
 static int s2n_common_chan_seek(ClientData cdata, long offset, int mode, int* errorCodePtr) //<<<
+{
+	// Stub: Tcl 8.6 prefers wideSeekProc but panics if seekProc is NULL.
+	(void)cdata; (void)offset; (void)mode;
+	*errorCodePtr = EINVAL;
+	return -1;
+}
+
+//>>>
+#endif
+static Tcl_WideInt s2n_common_chan_wide_seek(ClientData cdata, Tcl_WideInt offset, int mode, int* errorCodePtr) //<<<
 {
 	struct con_cx*	con_cx = cdata;
 
-	CLOGS(IO, "--> offset: %ld, mode: %d", offset, mode);
+	CLOGS(IO, "--> offset: %" TCL_LL_MODIFIER "d, mode: %d", (long long)offset, mode);
 	if (mode == SEEK_CUR) {
-		return con_cx->write_count;
+		return (Tcl_WideInt)con_cx->write_count;
 	}
 	*errorCodePtr = EINVAL;
 	return -1;
@@ -728,6 +751,7 @@ static int s2n_common_chan_seek(ClientData cdata, long offset, int mode, int* er
 // Internal API <<<
 void free_interp_cx(ClientData cdata, Tcl_Interp* interp) //<<<
 {
+	(void)interp;
 	struct interp_cx*	l = (struct interp_cx*)cdata;
 
 	CLOGS(LIFECYCLE, "free_interp_cx");
@@ -859,7 +883,7 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 			switch (conf_name) {
 				case CONFIG_SESSION_TICKETS:
 				{
-					uint8_t	enabled;
+					int	enabled;
 					TEST_OK_LABEL(finally, code, Tcl_GetBooleanFromObj(interp, val, &enabled));
 					CHECK_S2N(finally, code, s2n_config_set_session_cache_onoff(c, enabled));
 					break;
@@ -951,8 +975,9 @@ static int s2n_basechan_recv(void* io_context, uint8_t* buf, uint32_t len) //<<<
 
 // Internal API >>>
 // Script API <<<
-OBJCMD(push_cmd) //<<<
+static OBJCMD(push_cmd) //<<<
 {
+	(void)cdata;
 	int				code = TCL_OK;
 	int				i;
 	static const char* opts[] = {
@@ -1112,8 +1137,9 @@ finally:
 }
 
 //>>>
-OBJCMD(socket_cmd) //<<<
+static OBJCMD(socket_cmd) //<<<
 {
+	(void)cdata;
 	int				code = TCL_OK;
 	int				i;
 	static const char* opts[] = {
@@ -1341,8 +1367,9 @@ finally:
 }
 
 //>>>
-OBJCMD(openssl_version_cmd) //<<<
+static OBJCMD(openssl_version_cmd) //<<<
 {
+	(void)cdata;
 	int			code = TCL_OK;
 
 	enum {A_cmd, A_objc};

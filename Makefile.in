@@ -406,13 +406,13 @@ clean:
 	-test -z "$(BINARIES)" || rm -f $(BINARIES)
 	-rm -f *.$(OBJEXT) core *.core
 	-test -z "$(CLEANFILES)" || rm -f $(CLEANFILES)
-	-rm -rf local
-	#-rm -rf build
+	# local/ and build/ are deliberately preserved — they hold the
+	# version-pinned interned dependencies.  Use deps-clean to rebuild them.
 
 deps-clean:
-	-rm -rf build
+	-rm -rf build local
 
-distclean: clean
+distclean: clean deps-clean
 	-rm -f *.tab.c
 	-rm -f $(CONFIG_CLEAN_FILES)
 	-rm -f config.cache config.log config.status
@@ -493,11 +493,18 @@ uninstall-binaries:
 deps: local/lib/libs2n.a local/lib/libclogs.a deps-aio
 
 local/lib/libs2n.a:
-	#mkdir -p $(top_builddir)/local/lib
-	#ln -s $(top_builddir)/local/lib $(top_builddir)/local/lib64
+	# Remove any stale cmake caches from a previous run.  cmake caches
+	# CMAKE_C_FLAGS / CMAKE_CXX_FLAGS from the env on first configure and
+	# then never re-evaluates env, so a prior run that picked up e.g.
+	# CFLAGS=-fsanitize=address from the shell would silently persist and
+	# contaminate every subsequent build.  Combined with the explicit
+	# -DCMAKE_C_FLAGS= below, this pins the dep build flags deterministically.
+	-rm -rf $(top_builddir)/build/aws-lc $(top_builddir)/build/s2n-tls
 	cd $(srcdir)/deps/aws-lc && \
 		cmake -B $(top_builddir)/build/aws-lc \
 			-DCMAKE_BUILD_TYPE=$(S2N_BUILD_MODE) \
+			-DCMAKE_C_FLAGS= \
+			-DCMAKE_CXX_FLAGS= \
 			-DBUILD_TESTING=OFF \
 			-DBUILD_LIBSSL=OFF \
 			-DBUILD_TOOL=OFF \
@@ -516,13 +523,15 @@ local/lib/libs2n.a:
 			-DS2N_LTO=OFF \
 			-DBUILD_TESTING=OFF \
 			-DCMAKE_BUILD_TYPE=$(S2N_BUILD_MODE) \
+			-DCMAKE_C_FLAGS= \
+			-DCMAKE_CXX_FLAGS= \
 			-DCMAKE_PREFIX_PATH=$(top_builddir)/local \
 			-DCMAKE_INSTALL_PREFIX=$(top_builddir)/local && \
 		cmake --build $(top_builddir)/build/s2n-tls -j 20 && \
 		cmake --install $(top_builddir)/build/s2n-tls
 
-local/lib/libclogs.a: deps/clogs/*.c deps/clogs/*.h deps/clogs/*.def deps/clogs/Makefile
-	make -C deps/clogs clean install CFLAGS_OPTIMIZE="$(CFLAGS)" DESTDIR=$(top_builddir) PREFIX=/local
+local/lib/libclogs.a: subprojects/clogs/*.c subprojects/clogs/*.h subprojects/clogs/*.def subprojects/clogs/Makefile
+	make -C subprojects/clogs clean install CFLAGS_OPTIMIZE="$(CFLAGS)" DESTDIR=$(top_builddir) PREFIX=/local
 
 deps-aio: deps/aio/aio.tcl deps/aio/Makefile
 	make -C deps/aio clean install DESTDIR=$(top_builddir) PREFIX=/local
@@ -533,7 +542,7 @@ deps-aio: deps/aio/aio.tcl deps/aio/Makefile
 include $(top_builddir)/Makefile.teabase
 
 alltags:
-	ctags-exuberant -R generic/* deps/s2n-tls/tls deps/s2n-tls/api deps/aws-lc/crypto deps/clogs/*.c deps/clogs/*.h $(TCL_SRC_DIR)
+	ctags-exuberant -R generic/* deps/s2n-tls/tls deps/s2n-tls/api deps/aws-lc/crypto subprojects/clogs/*.c subprojects/clogs/*.h $(TCL_SRC_DIR)
 
 .PHONY: alltags
 

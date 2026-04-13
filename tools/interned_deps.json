@@ -1,0 +1,35 @@
+{
+  "deps": {
+    "aws-lc": {
+      "source":  "deps/aws-lc",
+      "builder": "cmake",
+      "defines": {
+        "CMAKE_BUILD_TYPE":     "Release",
+        "BUILD_TESTING":        "OFF",
+        "BUILD_LIBSSL":         "OFF",
+        "BUILD_TOOL":           "OFF",
+        "DISABLE_PERL":         "ON",
+        "DISABLE_GO":           "ON",
+        "CMAKE_INSTALL_PREFIX": "${prefix}"
+      }
+    },
+    "s2n-tls": {
+      "source":  "deps/s2n-tls",
+      "builder": "cmake",
+      "depends": ["aws-lc"],
+      "defines": {
+        "CMAKE_BUILD_TYPE":     "Release",
+        "BUILD_TESTING":        "OFF",
+        "SEARCH_LIBCRYPTO":     "OFF",
+        "S2N_INTERN_LIBCRYPTO": "ON",
+        "S2N_LTO":              "OFF",
+        "CMAKE_PREFIX_PATH":    "${prefix}",
+        "CMAKE_INSTALL_PREFIX": "${prefix}"
+      }
+    }
+  },
+  "unsupported_hosts": [
+    "*-*-mingw*",
+    "*-*-windows*"
+  ]
+}

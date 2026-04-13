@@ -14,7 +14,7 @@
 	url = https://github.com/aws/aws-lc
 	shallow = true
 [submodule "deps/clogs"]
-	path = deps/clogs
+	path = subprojects/clogs
 	url = https://github.com/cyanogilvie/clogs
 [submodule "deps/aio"]
 	path = deps/aio

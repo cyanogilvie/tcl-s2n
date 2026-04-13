@@ -5,7 +5,7 @@
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <meta name="author" content="Cyan Ogilvie" />
-  <title>s2n(3) 0.6.0 | s2n Tcl wrapper</title>
+  <title>s2n(3) 0.7.0 | s2n Tcl wrapper</title>
   <style>
     html {
       color: #1a1a1a;
@@ -248,13 +248,13 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">s2n(3) 0.6.0 | s2n Tcl wrapper</h1>
+<h1 class="title">s2n(3) 0.7.0 | s2n Tcl wrapper</h1>
 <p class="author">Cyan Ogilvie</p>
 </header>
 <h1 id="s2n">S2N</h1>
 <p>s2n Tcl wrapper - layer TLS onto Tcl channels</p>
 <h2 id="synopsis">SYNOPSIS</h2>
-<p><strong>package require s2n</strong> ?0.6.0?</p>
+<p><strong>package require s2n</strong> ?0.7.0?</p>
 <p><strong>s2n::push</strong> <em>channelName</em> ?<em>-opt</em>
 <em>val</em> …?<br />
 <strong>s2n::socket</strong> ?<em>-opt</em> <em>val</em> …?
@@ -382,11 +382,11 @@ package build process.</p>
 to support 8.6.</p>
 <h3 id="from-a-release-tarball">From a Release Tarball</h3>
 <p>Download and extract <a
-href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz">the
+href="https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz">the
 release</a>, then build in the standard TEA way:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">tar</span> xf tcl-s2n-0.6.0.tar.gz</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> tcl-s2n-0.6.0</span>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">tar</span> xf tcl-s2n-0.7.0.tar.gz</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> tcl-s2n-0.7.0</span>
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./configure</span></span>
 <span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span></span>
 <span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> make install</span></code></pre></div>
@@ -406,7 +406,7 @@ only adding the installed package without documentation to the image,
 and strip debug symbols, minimising image size:</p>
 <div class="sourceCode" id="cb4"><pre
 class="sourceCode dockerfile"><code class="sourceCode dockerfile"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">WORKDIR</span> /tmp/tcl-s2n</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">RUN</span> <span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.6.0/tcl-s2n-0.6.0.tar.gz <span class="at">-O</span> <span class="at">-</span> <span class="kw">|</span> <span class="fu">tar</span> xz <span class="at">--strip-components</span><span class="op">=</span>1 <span class="kw">&amp;&amp;</span> <span class="dt">\</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">RUN</span> <span class="fu">wget</span> https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.0/tcl-s2n-0.7.0.tar.gz <span class="at">-O</span> <span class="at">-</span> <span class="kw">|</span> <span class="fu">tar</span> xz <span class="at">--strip-components</span><span class="op">=</span>1 <span class="kw">&amp;&amp;</span> <span class="dt">\</span></span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    <span class="ex">./configure</span><span class="kw">;</span> <span class="fu">make</span> test install-binaries install-libraries <span class="kw">&amp;&amp;</span> <span class="dt">\</span></span>
 <span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">strip</span> /usr/local/lib/libs2n<span class="pp">*</span>.so <span class="kw">&amp;&amp;</span> <span class="dt">\</span></span>
 <span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="bu">cd</span> .. <span class="kw">&amp;&amp;</span> <span class="fu">rm</span> <span class="at">-rf</span> tcl-s2n</span></code></pre></div>
@@ -450,14 +450,14 @@ the capabilities then granting the IPC_LOCK capability will permit s2n
 to use mlock. For example, using docker that looks like this:</p>
 <div class="sourceCode" id="cb8"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">%</span> docker run <span class="at">--rm</span> <span class="at">-it</span> <span class="at">--cap-add</span> IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> package require s2n</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="ex">0.6.0</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="ex">0.7.0</span></span>
 <span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> </span></code></pre></div>
 <p>If you cannot add the IPC_LOCK capability then s2n’s use of mlock can
 be disabled by setting the S2N_DONT_MLOCK environment variable (at the
 cost of losing the mlock protection for key material):</p>
 <div class="sourceCode" id="cb9"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">%</span> docker run <span class="at">--rm</span> <span class="at">-it</span> <span class="at">-e</span> S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped</span>
 <span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span> package require s2n</span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="ex">0.6.0</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="ex">0.7.0</span></span>
 <span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="ex">tclsh8.7</span> <span class="pp">[</span><span class="ss">/here</span><span class="pp">]</span></span></code></pre></div>
 <h2 id="fuzzing">FUZZING</h2>
 <p>TODO</p>
