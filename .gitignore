@@ -19,6 +19,8 @@ build
 # meson
 /build-meson
 /doc/*.n
+/doc/*.html
+/doc/*.pdf
 /doc/s2n.md
 /subprojects/.wraplock
 /subprojects/packagecache

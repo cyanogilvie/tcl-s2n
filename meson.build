@@ -53,3 +53,6 @@ deps += dependency('clogs',
 
 subdir('teabase')
 subdir('doc')
+
+# `meson dist` fixup: bake configure, trim dep test vectors.
+meson.add_dist_script('tools/dist_fixup.sh')

@@ -209,7 +209,7 @@ libraries:
 # end user machine when building from source.
 #========================================================================
 
-doc: doc/s2n.n README.md doc/s2n.pdf doc/s2n.html
+doc: doc/s2n.n README.md
 
 doc/.build/s2n.md: $(srcdir)/doc/s2n.md.in $(top_builddir)/config.status
 	cd $(top_builddir) \
@@ -221,13 +221,7 @@ doc/s2n.n: doc/.build/s2n.md
 	pandoc --standalone --from markdown --to man doc/.build/s2n.md --output doc/s2n.n
 
 README.md: doc/.build/s2n.md
-	pandoc --standalone --from markdown --to gfm doc/.build/s2n.md --output README.md
-
-doc/s2n.pdf: doc/.build/s2n.md
-	pandoc --standalone --from markdown --to pdf doc/.build/s2n.md --output doc/s2n.pdf
-
-doc/s2n.html: doc/.build/s2n.md doc/styles.css
-	pandoc --standalone --from markdown --to html5 doc/.build/s2n.md -H doc/styles.css --output doc/s2n.html
+	pandoc --from markdown --to gfm doc/.build/s2n.md --output README.md
 
 install: all install-binaries install-libraries install-doc
 

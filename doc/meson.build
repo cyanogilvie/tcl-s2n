@@ -9,17 +9,6 @@ if pandoc.found()
 
   doc_targets = []
 
-  doc_targets += custom_target('htmldoc',
-    input:    doc_md,
-    output:   meson.project_name() + '.html',
-    command:  [pandoc, '--standalone', '--metadata', 'title=' + meson.project_name(),
-      '--from', 'markdown', '--to', 'html',
-      '@INPUT@', '--output', '@OUTPUT@'],
-    install:          true,
-    install_dir:      get_option('datadir') / 'doc',
-    build_by_default: true,
-  )
-
   doc_targets += custom_target('manpage',
     input:    doc_md,
     output:   meson.project_name() + '.n',
@@ -30,6 +19,10 @@ if pandoc.found()
     install:          true,
   )
 
+  # Also build README.md by default so dist_fixup.sh can copy a freshly
+  # generated copy into the dist tarball.  install: writes back into the
+  # source tree only when explicitly requested (`meson install --tags source`)
+  # so that committing a fresh README.md is an opt-in step.
   doc_targets += custom_target('readme',
     input:    doc_md,
     output:   'README.md',
@@ -37,7 +30,7 @@ if pandoc.found()
       '@INPUT@', '--output', '@OUTPUT@'],
     install_dir:      meson.project_source_root(),
     install_tag:      'source',
-    build_by_default: false,
+    build_by_default: true,
   )
 
   alias_target('doc', doc_targets)

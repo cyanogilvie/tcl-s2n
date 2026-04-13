@@ -1,78 +1,77 @@
-name: Makefile CI
+name: Build and Release
 
 on: push
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
 
     - name: Install dependencies
       run: |
-        sudo apt update
-        sudo apt install pandoc texlive-latex-base texlive-latex-recommended
+        sudo apt-get update
+        sudo apt-get install -y \
+          meson ninja-build cmake autoconf pandoc
 
-    - name: Cache Tcl build
-      id: cache-tcl
-      uses: actions/cache@v3
+    - name: Cache Tcl 9.0.3 build
+      id: cache-tcl9
+      uses: actions/cache@v5
       with:
-        path: /opt/tcl8.7
-        key: ${{ runner.os }}-f7629abff2
+        path: /opt/tcl9
+        key: ${{ runner.os }}-tcl-9.0.3
 
-    - name: Build Tcl 8.7
-      if: steps.cache-tcl.outputs.cache-hit != 'true'
+    - name: Build Tcl 9.0.3
+      if: steps.cache-tcl9.outputs.cache-hit != 'true'
       run: |
+        sudo mkdir -p /opt/tcl9
+        sudo chown -R $(id -u) /opt/tcl9
         mkdir -p /tmp/src/tcl
         cd /tmp/src/tcl
-        wget https://core.tcl-lang.org/tcl/tarball/f7629abff2/tcl.tar.gz -O - | tar xz --strip-components=1
+        wget https://core.tcl-lang.org/tcl/tarball/core-9-0-3/tcl.tar.gz -O - | tar xz --strip-components=1
         cd unix
-        ./configure CFLAGS="-DPURIFY" --enable-symbols --enable-testmode --prefix=/opt/tcl8.7
-        make -j 8
-        sudo make install
+        ./configure --prefix=/opt/tcl9
+        make -j $(nproc)
+        make install
 
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v6
       with:
-        submodules: 'true'
+        submodules: recursive
 
-    - name: Build tcl-s2n
+    - name: Build and test (meson)
+      env:
+        PKG_CONFIG_PATH: /opt/tcl9/lib/pkgconfig
       run: |
-        autoconf
-        ./configure --with-tcl=/opt/tcl8.7/lib
-        make dist PKG_DIR=distcheck
+        meson setup build-meson
+        meson compile -C build-meson
+        meson test -C build-meson --print-errorlogs
 
-    - name: Run tests
+    - name: Build and test (autotools)
+      env:
+        PKG_CONFIG_PATH: /opt/tcl9/lib/pkgconfig
       run: |
-        cd /tmp/dist/distcheck
-        ./configure --with-tcl=/opt/tcl8.7/lib --enable-testmode
-        make test 2>&1 | tee /tmp/test_results.log
+        autoreconf -fi
+        ./configure --with-tcl=/opt/tcl9/lib
+        make
+        make test
 
-    - name: Upload test results
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results
-        path: /tmp/test_results.log
+    - name: Generate dist tarball
+      # --allow-dirty: the autotools step above leaves untracked artifacts
+      # in the working tree.  meson dist still only archives git-tracked
+      # files, so the dirt doesn't leak into the tarball.
+      run: meson dist -C build-meson --no-tests --allow-dirty --formats=gztar
 
-    - name: Dist
-      #if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        make dist
-    - uses: actions/upload-artifact@v4
+    - name: Upload tarball
+      uses: actions/upload-artifact@v7
       with:
         name: release-tarball
-        path: /tmp/dist/s2n*.tar.gz
+        path: build-meson/meson-dist/s2n-*.tar.gz
 
-    - name: Release
-      uses: softprops/action-gh-release@v1
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/v')
       with:
         draft: false
-        prerelease: true
-        files: |
-          /tmp/dist/tcl-s2n-*.tar.gz
-
-#    - name: debug
-#      if: ${{ failure() }}
-#      uses: mxschmitt/action-tmate@v3
-
+        prerelease: false
+        generate_release_notes: true
+        files: build-meson/meson-dist/s2n-*.tar.gz
