@@ -57,7 +57,26 @@
 
 #define S2N_CON_NAME(_c)  clogs_name(_c, CLOGS_PURPLEISH)
 
-#define CHECK_S2N(label, var, cmd) \
+// Label-less variants: return TCL_ERROR / EPROTO on s2n failure. Use with
+// defer-based cleanup; the label-ful variants (_LABEL) are kept for
+// goto-style cleanup paths that still exist in free_con_cx and similar.
+#define CHECK_S2N(cmd) \
+	if ((cmd) != S2N_SUCCESS) { \
+		Tcl_SetErrorCode(interp, "S2N", s2n_strerror_name(s2n_errno), NULL); \
+		Tcl_SetObjResult(interp, Tcl_NewStringObj(s2n_strerror(s2n_errno, "EN"), -1)); \
+		return TCL_ERROR; \
+	}
+
+#define CHECK_S2N_POSIX_RETURN(cmd) \
+	if ((cmd) != S2N_SUCCESS) { \
+		if (interp) { \
+			Tcl_SetErrorCode(interp, "S2N", s2n_strerror_name(s2n_errno), NULL); \
+			Tcl_SetObjResult(interp, Tcl_NewStringObj(s2n_strerror(s2n_errno, "EN"), -1)); \
+		} \
+		return EPROTO; \
+	}
+
+#define CHECK_S2N_LABEL(label, var, cmd) \
 	if ((cmd) != S2N_SUCCESS) { \
 		Tcl_SetErrorCode(interp, "S2N", s2n_strerror_name(s2n_errno), NULL); \
 		Tcl_SetObjResult(interp, Tcl_NewStringObj(s2n_strerror(s2n_errno, "EN"), -1)); \
@@ -65,7 +84,7 @@
 		goto label; \
 	}
 
-#define CHECK_S2N_POSIX(label, var, cmd) \
+#define CHECK_S2N_POSIX_LABEL(label, var, cmd) \
 	if ((cmd) != S2N_SUCCESS) { \
 		if (interp) { \
 			Tcl_SetErrorCode(interp, "S2N", s2n_strerror_name(s2n_errno), NULL); \

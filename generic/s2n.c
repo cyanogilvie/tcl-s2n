@@ -1,4 +1,5 @@
 #include "s2nInt.h"
+#include "defer.h"
 
 // Must be kept in sync with the enum in s2nInt.tcl
 static const char* lit_str[L_size] = {
@@ -114,7 +115,7 @@ static int s2n_stacked_chan_set_option(ClientData cdata, Tcl_Interp* interp, con
 	struct con_cx*	con_cx = cdata;
 
 	if (strcmp(optname, "-servername") == 0) {
-		CHECK_S2N(finally, code, s2n_set_server_name(con_cx->s2n_con, optval));
+		CHECK_S2N_LABEL(finally, code, s2n_set_server_name(con_cx->s2n_con, optval));
 	} else {
 		code = Tcl_BadChannelOption(interp, optname, "servername");
 		Tcl_SetErrno(EINVAL);
@@ -313,7 +314,7 @@ static int s2n_direct_chan_set_option(ClientData cdata, Tcl_Interp* interp, cons
 	struct con_cx*	con_cx = cdata;
 
 	if (strcmp(optname, "-servername") == 0) {
-		CHECK_S2N(finally, code, s2n_set_server_name(con_cx->s2n_con, optval));
+		CHECK_S2N_LABEL(finally, code, s2n_set_server_name(con_cx->s2n_con, optval));
 	} else {
 		code = Tcl_BadChannelOption(interp, optname, "servername");
 		Tcl_SetErrno(EINVAL);
@@ -591,119 +592,72 @@ done:
 //>>>
 static int s2n_common_chan_close2(ClientData cdata, Tcl_Interp* interp, int flags) //<<<
 {
-	int				posixcode = 0;
-	struct con_cx*	con_cx = cdata;
-
+	struct con_cx* con_cx = cdata;
 	CLOGS(IO, "--> %x", flags);
+
 	if (flags & TCL_CLOSE_READ) {
 		if (interp) {
 			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_common_chan_close2: Cannot close read side"));
 			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
 		}
-		posixcode = EINVAL;
-		goto finally;
-	} else if (flags & TCL_CLOSE_WRITE && !con_cx->write_closed) {
-		s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
+		return EINVAL;
+	}
+
+	if (flags & TCL_CLOSE_WRITE) {
+		if (con_cx->write_closed) return 0;
+
+		s2n_blocked_status blocked = S2N_NOT_BLOCKED;
 		const int rc = s2n_shutdown_send(con_cx->s2n_con, &blocked);
 		if (rc == S2N_SUCCESS) {
 			con_cx->write_closed = 1;
-			if (con_cx->type == CHANTYPE_DIRECT) {
-				if (-1 == shutdown(con_cx->fd, SHUT_WR)) {
-					posixcode = errno;
-					goto set_interp_err_errno;
+			if (con_cx->type == CHANTYPE_DIRECT && -1 == shutdown(con_cx->fd, SHUT_WR)) {
+				const int ec = errno;
+				if (interp) {
+					Tcl_SetErrno(ec);
+					Tcl_SetErrorCode(interp, "POSIX", Tcl_ErrnoId(), Tcl_ErrnoMsg(ec), NULL);
+					Tcl_SetObjResult(interp, Tcl_ObjPrintf("close: %s %s", Tcl_ErrnoId(), Tcl_ErrnoMsg(ec)));
 				}
+				return ec;
 			}
-		} else {
-			switch (s2n_error_get_type(s2n_errno)) {
-				case S2N_ERR_T_BLOCKED:
-				case S2N_ERR_T_CLOSED:
-					con_cx->write_closed = 1;
-					break;
-
-				case S2N_ERR_T_IO:
-					posixcode = errno;
-					goto set_interp_err_s2n_errno;
-
-				case S2N_ERR_T_PROTO:
-					posixcode = EPROTO;
-					goto set_interp_err_s2n_errno;
-
-				default:
-					posixcode = EINVAL;
-					goto set_interp_err_s2n_errno;
-			}
+			return 0;
 		}
 
-	} else if (flags == 0) {
-		CLOGS(LIFECYCLE, "closing connection %s", S2N_CON_NAME(con_cx->s2n_con));
-		if (!con_cx->write_closed) {
-			s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
-			CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
-			const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
-			// TODO: Handle blocked?
-			if (rc != S2N_SUCCESS) {
-				// s2n_shutdown couldn't send close_notify cleanly — maybe the
-				// handshake never completed (mid-negotiate abandon), maybe the
-				// peer hung up, maybe the call would block. Record the error
-				// on the interp but fall through to close_sock anyway: a
-				// failing TLS shutdown does NOT entitle us to leak the Tcl
-				// channel and its con_cx. Otherwise the channel lingers with
-				// a typePtr into our library's data segment, and Tcl's
-				// process-exit IO finalize crashes after the library has been
-				// unloaded by TclFinalizeLoad.
-				const int err_type = s2n_error_get_type(s2n_errno);
-				if (err_type == S2N_ERR_T_BLOCKED || err_type == S2N_ERR_T_CLOSED) {
-					// non-fatal: handshake incomplete / already closed
-				} else {
-					if (interp) {
-						Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_shutdown failed: %s", s2n_strerror(s2n_errno, "EN")));
-						Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-					}
-					switch (err_type) {
-						case S2N_ERR_T_IO:		posixcode = errno ? errno : EIO;	break;
-						case S2N_ERR_T_PROTO:	posixcode = EPROTO;	break;
-						default:				posixcode = EINVAL;	break;
-					}
-				}
-			}
+		const int err_type = s2n_error_get_type(s2n_errno);
+		if (err_type == S2N_ERR_T_BLOCKED || err_type == S2N_ERR_T_CLOSED) {
+			con_cx->write_closed = 1;
+			return 0;
 		}
-		goto close_sock;
+		if (interp) {
+			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_shutdown_send failed: %s", s2n_strerror(s2n_errno, "EN")));
+			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
+		}
+		switch (err_type) {
+			case S2N_ERR_T_IO:		return errno ? errno : EIO;
+			case S2N_ERR_T_PROTO:	return EPROTO;
+			default:				return EINVAL;
+		}
+	}
 
-	} else {
+	if (flags != 0) {
 		if (interp) {
 			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_common_chan_close2: unknown flags: %d", flags));
 			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
 		}
-		posixcode = EINVAL;
-		goto finally;
+		return EINVAL;
 	}
 
-finally:
-	CLOGS(IO, "<-- %x returning %d", flags, posixcode);
-	return posixcode;
+	// flags == 0: full close.
+	CLOGS(LIFECYCLE, "closing connection %s", S2N_CON_NAME(con_cx->s2n_con));
 
-set_interp_err_s2n_errno:
-	if (interp) {
-		Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_direct_chan_close2: s2n_shutdown_send failed: %s", s2n_strerror(s2n_errno, "EN")));
-		Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-	}
-	posixcode = EIO;
-	goto finally;
+	int posixcode = 0;
 
-set_interp_err_errno:
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-	{
-		int code;
-		posixcode = errno;
-		if (interp) THROW_POSIX_LABEL(finally, code, "close");
-		goto finally;
-	}
-#pragma GCC diagnostic pop
-
-close_sock:
-	{
-		const int is_direct	= con_cx->type == CHANTYPE_DIRECT;
+	// The fd + con_cx tear-down always runs, even if s2n_shutdown fails —
+	// leaving the Tcl channel alive with a typePtr into our library's data
+	// segment would crash TclFinalizeIOSubsystem after library unload.
+	// Reporting a close() errno is suppressed when we've already recorded a
+	// more informative s2n_shutdown error.
+	defer {
+		const int is_direct = con_cx->type == CHANTYPE_DIRECT;
 		int rc = 0;
 		if (is_direct) {
 			// Remove Tcl's internal file handler before closing the fd;
@@ -713,16 +667,43 @@ close_sock:
 			rc = close(con_cx->fd);
 		}
 		free_con_cx(con_cx);
-		con_cx = NULL;
 		if (is_direct && rc == -1 && posixcode == 0) {
-			// Only overwrite posixcode if we didn't already record a shutdown
-			// error above — the shutdown failure is more informative than the
-			// close() errno it'd typically come with.
-			posixcode = errno;
-			goto set_interp_err_errno;
+			const int ec = errno;
+			posixcode = ec;
+			if (interp) {
+				Tcl_SetErrno(ec);
+				Tcl_SetErrorCode(interp, "POSIX", Tcl_ErrnoId(), Tcl_ErrnoMsg(ec), NULL);
+				Tcl_SetObjResult(interp, Tcl_ObjPrintf("close: %s %s", Tcl_ErrnoId(), Tcl_ErrnoMsg(ec)));
+			}
 		}
-		goto finally;
+		CLOGS(IO, "<-- 0 returning %d", posixcode);
 	}
+
+	if (!con_cx->write_closed) {
+		s2n_blocked_status blocked = S2N_NOT_BLOCKED;
+		CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
+		const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
+		// TODO: Handle blocked?
+		if (rc != S2N_SUCCESS) {
+			const int err_type = s2n_error_get_type(s2n_errno);
+			// BLOCKED / CLOSED are non-fatal — peer already gone, or handshake
+			// never completed. Record other errors on the interp but let the
+			// defer tear things down regardless.
+			if (err_type != S2N_ERR_T_BLOCKED && err_type != S2N_ERR_T_CLOSED) {
+				if (interp) {
+					Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_shutdown failed: %s", s2n_strerror(s2n_errno, "EN")));
+					Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
+				}
+				switch (err_type) {
+					case S2N_ERR_T_IO:		posixcode = errno ? errno : EIO;	break;
+					case S2N_ERR_T_PROTO:	posixcode = EPROTO;					break;
+					default:				posixcode = EINVAL;					break;
+				}
+			}
+		}
+	}
+
+	return posixcode;
 }
 
 //>>>
@@ -874,125 +855,114 @@ static void dup_s2n_config_intrep(Tcl_Obj* src, Tcl_Obj* dst) //<<<
 // the Tcl_Obj (e.g. past a shimmer) must increment refCount themselves.
 static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_config_rc** config_rc) //<<<
 {
-	int						code = TCL_OK;
-	Tcl_DictSearch			search = {0};
-	int						search_active = 0;	// only call Tcl_DictObjDone if we
-											// successfully started a search.
-											// Tcl 9's "no search" sentinel is
-											// search.epoch == 0 (zero-init OK), but
-											// Tcl 8.6's is search.epoch == -1 — so a
-											// zero-inited search NULL-derefs in 8.6
-											// if Tcl_DictObjFirst was never called.
-	Tcl_ObjInternalRep*		ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
-	struct s2n_config_rc*	rc = NULL;
-
-	if (!ir) {
-		Tcl_Obj*		key = NULL;
-		Tcl_Obj*		val = NULL;
-		int				done;
-		const char*		ca_file = NULL;		// buffered until after the dict walk — see below
-		const char*		ca_dir  = NULL;
-
-		rc = (struct s2n_config_rc*)ckalloc(sizeof *rc);
-		*rc = (struct s2n_config_rc){0};
-		rc->refCount++;					// the intrep holds a reference
-		rc->c = s2n_config_new();
-		struct s2n_config* c = rc->c;	// alias for the per-key setters below
-
-		TEST_OK_LABEL(finally, code, Tcl_DictObjFirst(interp, obj, &search, &key, &val, &done));
-		search_active = 1;
-		for (; !done; Tcl_DictObjNext(&search, &key, &val, &done)) {
-			static const char* config_names[] = {
-				"session_tickets",
-				"ticket_lifetime",
-				"cipher_preferences",
-				"ca_file",
-				"ca_dir",
-				NULL
-			};
-			enum config {
-				CONFIG_SESSION_TICKETS,
-				CONFIG_TICKET_LIFETIME,
-				CONFIG_CIPHER_PREFERENCES,
-				CONFIG_CA_FILE,
-				CONFIG_CA_DIR,
-			} conf_name;
-			int conf_name_int;
-
-			TEST_OK_LABEL(finally, code, Tcl_GetIndexFromObj(interp, key, config_names, "config", TCL_EXACT, &conf_name_int));
-			conf_name = conf_name_int;
-
-			switch (conf_name) {
-				case CONFIG_SESSION_TICKETS:
-				{
-					int	enabled;
-					TEST_OK_LABEL(finally, code, Tcl_GetBooleanFromObj(interp, val, &enabled));
-					CHECK_S2N(finally, code, s2n_config_set_session_cache_onoff(c, enabled));
-					break;
-				}
-
-				case CONFIG_TICKET_LIFETIME:
-				{
-					Tcl_Obj**	ov;
-					Tcl_Size	oc;
-					Tcl_WideInt	lifetime;
-
-					TEST_OK_LABEL(finally, code, Tcl_ListObjGetElements(interp, val, &oc, &ov));
-					if (oc != 2) THROW_ERROR_LABEL(finally, code, "ticket_lifetime must be a list of two integers", val);
-					TEST_OK_LABEL(finally, code, Tcl_GetWideIntFromObj(interp, ov[0], &lifetime));
-					CHECK_S2N(finally, code, s2n_config_set_ticket_encrypt_decrypt_key_lifetime(c, lifetime));
-					TEST_OK_LABEL(finally, code, Tcl_GetWideIntFromObj(interp, ov[1], &lifetime));
-					CHECK_S2N(finally, code, s2n_config_set_ticket_decrypt_key_lifetime(c, lifetime));
-					break;
-				}
-
-				case CONFIG_CIPHER_PREFERENCES:
-					CHECK_S2N(finally, code, s2n_config_set_cipher_preferences(c, Tcl_GetString(val)));
-					break;
-
-				case CONFIG_CA_FILE:
-					ca_file = Tcl_GetString(val);
-					break;
-
-				case CONFIG_CA_DIR:
-					ca_dir = Tcl_GetString(val);
-					break;
-
-				default: THROW_ERROR_LABEL(finally, code, "Unhandled config", key);
-			}
-		}
-
-		// Apply buffered ca_file / ca_dir as a single s2n call — the API accepts both at
-		// once (either may be NULL) and a caller dict that sets only ca_dir must not
-		// clobber an earlier ca_file (and vice-versa). Wipe the default trust store first
-		// so the supplied bundle *replaces* system roots — matches AWS CLI AWS_CA_BUNDLE
-		// semantics. See s2n.h:850-868 for the underlying API's additive default.
-		if (ca_file != NULL || ca_dir != NULL) {
-			CHECK_S2N(finally, code, s2n_config_wipe_trust_store(c));
-			CHECK_S2N(finally, code, s2n_config_set_verification_ca_location(c, ca_file, ca_dir));
-		}
-
-		Tcl_GetString(obj);	// Ensure that the string rep is generated before we take over the intrep - we can't generate our own
-		// The build-time refCount=1 (set at allocation) is repurposed as the
-		// intrep's reference now that StoreInternalRep succeeds. No extra ++ here.
-		Tcl_StoreInternalRep(obj, &s2n_config_type, &(Tcl_ObjInternalRep){.twoPtrValue.ptr1 = rc});
-		register_intrep(obj);
-		ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
-		CLOGS(LIFECYCLE, "created config %s", clogs_name(obj));
-	} else {
-		rc = (struct s2n_config_rc*)ir->twoPtrValue.ptr1;
+	Tcl_ObjInternalRep* ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
+	if (ir) {
+		*config_rc = (struct s2n_config_rc*)ir->twoPtrValue.ptr1;
+		return TCL_OK;
 	}
 
-	*config_rc = rc;
-	rc = NULL;	// caller takes it; don't release on the failure path
+	struct s2n_config_rc* rc = (struct s2n_config_rc*)ckalloc(sizeof *rc);
+	*rc = (struct s2n_config_rc){.refCount = 1};	// build-time ref, handed off to
+													// the intrep on success; released
+													// by the defer below on any failure
+	rc->c = s2n_config_new();
+	defer { tcls2n_config_rc_release(&rc); }
 
-finally:
-	if (search_active) Tcl_DictObjDone(&search);
-	// Error path before StoreInternalRep: rc still has its build-time
-	// refCount=1 from allocation. Release it — refCount drops to 0 and
-	// rc + rc->c get freed.
-	tcls2n_config_rc_release(&rc);
-	return code;
+	struct s2n_config*	c = rc->c;
+	Tcl_Obj*			key = NULL;
+	Tcl_Obj*			val = NULL;
+	int					done;
+	const char*			ca_file = NULL;
+	const char*			ca_dir  = NULL;
+
+	// The dict walk: no need for a search_active flag — the defer that calls
+	// Tcl_DictObjDone is only registered if Tcl_DictObjFirst succeeds.
+	// (Portable across Tcl 9 and 8.6, whose "no active search" sentinel values
+	// for Tcl_DictSearch.epoch disagree: 0 vs -1.)
+	Tcl_DictSearch search;
+	TEST_OK(Tcl_DictObjFirst(interp, obj, &search, &key, &val, &done));
+	defer { Tcl_DictObjDone(&search); }
+
+	for (; !done; Tcl_DictObjNext(&search, &key, &val, &done)) {
+		static const char* config_names[] = {
+			"session_tickets",
+			"ticket_lifetime",
+			"cipher_preferences",
+			"ca_file",
+			"ca_dir",
+			NULL
+		};
+		enum config {
+			CONFIG_SESSION_TICKETS,
+			CONFIG_TICKET_LIFETIME,
+			CONFIG_CIPHER_PREFERENCES,
+			CONFIG_CA_FILE,
+			CONFIG_CA_DIR,
+		} conf_name;
+		int conf_name_int;
+
+		TEST_OK(Tcl_GetIndexFromObj(interp, key, config_names, "config", TCL_EXACT, &conf_name_int));
+		conf_name = conf_name_int;
+
+		switch (conf_name) {
+			case CONFIG_SESSION_TICKETS:
+			{
+				int enabled;
+				TEST_OK(Tcl_GetBooleanFromObj(interp, val, &enabled));
+				CHECK_S2N(s2n_config_set_session_cache_onoff(c, enabled));
+				break;
+			}
+
+			case CONFIG_TICKET_LIFETIME:
+			{
+				Tcl_Obj**	ov;
+				Tcl_Size	oc;
+				Tcl_WideInt	lifetime;
+
+				TEST_OK(Tcl_ListObjGetElements(interp, val, &oc, &ov));
+				if (oc != 2) THROW_ERROR("ticket_lifetime must be a list of two integers: ", Tcl_GetString(val));
+				TEST_OK(Tcl_GetWideIntFromObj(interp, ov[0], &lifetime));
+				CHECK_S2N(s2n_config_set_ticket_encrypt_decrypt_key_lifetime(c, lifetime));
+				TEST_OK(Tcl_GetWideIntFromObj(interp, ov[1], &lifetime));
+				CHECK_S2N(s2n_config_set_ticket_decrypt_key_lifetime(c, lifetime));
+				break;
+			}
+
+			case CONFIG_CIPHER_PREFERENCES:
+				CHECK_S2N(s2n_config_set_cipher_preferences(c, Tcl_GetString(val)));
+				break;
+
+			case CONFIG_CA_FILE:
+				ca_file = Tcl_GetString(val);
+				break;
+
+			case CONFIG_CA_DIR:
+				ca_dir = Tcl_GetString(val);
+				break;
+
+			default: THROW_ERROR("Unhandled config: ", Tcl_GetString(key));
+		}
+	}
+
+	// Apply buffered ca_file / ca_dir as a single s2n call — the API accepts both at
+	// once (either may be NULL) and a caller dict that sets only ca_dir must not
+	// clobber an earlier ca_file (and vice-versa). Wipe the default trust store first
+	// so the supplied bundle *replaces* system roots — matches AWS CLI AWS_CA_BUNDLE
+	// semantics. See s2n.h:850-868 for the underlying API's additive default.
+	if (ca_file != NULL || ca_dir != NULL) {
+		CHECK_S2N(s2n_config_wipe_trust_store(c));
+		CHECK_S2N(s2n_config_set_verification_ca_location(c, ca_file, ca_dir));
+	}
+
+	Tcl_GetString(obj);	// Ensure that the string rep is generated before we take over the intrep - we can't generate our own
+	Tcl_StoreInternalRep(obj, &s2n_config_type, &(Tcl_ObjInternalRep){.twoPtrValue.ptr1 = rc});
+	register_intrep(obj);
+	CLOGS(LIFECYCLE, "created config %s", clogs_name(obj));
+
+	*config_rc = rc;
+	rc = NULL;	// handoff: intrep now owns the build-time ref. Null the local
+				// so the defer's release becomes a no-op.
+	return TCL_OK;
 }
 
 //>>>
@@ -1036,8 +1006,6 @@ static int s2n_basechan_recv(void* io_context, uint8_t* buf, uint32_t len) //<<<
 static OBJCMD(push_cmd) //<<<
 {
 	(void)cdata;
-	int				code = TCL_OK;
-	int				i;
 	static const char* opts[] = {
 		"-config",
 		"-role",
@@ -1053,64 +1021,65 @@ static OBJCMD(push_cmd) //<<<
 	};
 	static const char* s2n_role_str[] = { "client", "server", NULL };
 	enum role { ROLE_CLIENT, ROLE_SERVER } role = ROLE_CLIENT;
-	int				roleint;
-	struct con_cx	*con_cx = NULL;
-	int				stacked = 0;
+	int roleint;
 
 	enum {A_cmd, A_CHAN, A_args};
-	CHECK_MIN_ARGS_LABEL(finally, code, "channelName ?-opt val ...?");
+	CHECK_MIN_ARGS("channelName ?-opt val ...?");
 
 	int basemode;
-	Tcl_Channel	basechan = Tcl_GetChannel(interp, Tcl_GetString(objv[A_CHAN]), &basemode);
-	if (
-		(basemode & TCL_READABLE) == 0 ||
-		(basemode & TCL_WRITABLE) == 0
-	) THROW_ERROR_LABEL(finally, code, "Channel must be readable and writable");
+	Tcl_Channel basechan = Tcl_GetChannel(interp, Tcl_GetString(objv[A_CHAN]), &basemode);
+	if ((basemode & TCL_READABLE) == 0 || (basemode & TCL_WRITABLE) == 0)
+		THROW_ERROR("Channel must be readable and writable");
 
-	con_cx = (struct con_cx*)ckalloc(sizeof *con_cx);
+	struct con_cx* con_cx = (struct con_cx*)ckalloc(sizeof *con_cx);
 	*con_cx = (struct con_cx){
 		.type		= CHANTYPE_STACKED,
 		.basechan	= basechan,
 		.blocked	= S2N_NOT_BLOCKED,
 	};
 	CLOGS(LIFECYCLE, "Created con_cx: %s", clogs_name(con_cx));
+	defer { if (con_cx) free_con_cx(con_cx); }
 
-	// Need to scan the options first to get the role
-	for (i=A_args; i<objc; i++) {
-		int			optint;
-		TEST_OK_LABEL(finally, code, Tcl_GetIndexFromObj(interp, objv[i], opts, "option", 0, &optint));
-		const enum opt	o = optint;
+	// Pre-scan for -role so s2n_connection_new can see it.
+	for (int i=A_args; i<objc; i++) {
+		int optint;
+		TEST_OK(Tcl_GetIndexFromObj(interp, objv[i], opts, "option", 0, &optint));
+		const enum opt o = optint;
 		switch (o) {
 			case OPT_ROLE:
-				TEST_OK_LABEL(finally, code, Tcl_GetIndexFromObj(interp, objv[++i], s2n_role_str, "role", 0, &roleint));
+				TEST_OK(Tcl_GetIndexFromObj(interp, objv[++i], s2n_role_str, "role", 0, &roleint));
 				role = roleint;
 				break;
 
 			case OPT_CONFIG:
 			case OPT_SERVERNAME:
 			case OPT_PREFER:
-				i++; break;
+				i++;
+				break;
 
 			default:
-				THROW_ERROR_LABEL(finally, code, "Unhandled option", objv[i]);
+				THROW_ERROR("Unhandled option: ", Tcl_GetString(objv[i]));
 		}
 	}
 
 	con_cx->s2n_con = s2n_connection_new(role == ROLE_CLIENT ? S2N_CLIENT : S2N_SERVER);
 	CLOGS(LIFECYCLE, "Created s2n connection: %s", S2N_CON_NAME(con_cx->s2n_con));
 
-	for (i=A_args; i<objc; i++) {
-		int			optint;
-		TEST_OK_LABEL(finally, code, Tcl_GetIndexFromObj(interp, objv[i], opts, "option", 0, &optint));
-		const enum opt	o = optint;
+	for (int i=A_args; i<objc; i++) {
+		int optint;
+		TEST_OK(Tcl_GetIndexFromObj(interp, objv[i], opts, "option", 0, &optint));
+		const enum opt o = optint;
 		switch (o) {
-			case OPT_ROLE:	i++; break;		// Handled above
+			case OPT_ROLE:
+				i++;
+				break;
+
 			case OPT_CONFIG: //<<<
 			{
-				struct s2n_config_rc*	config_rc = NULL;
-				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -config", NULL);
+				struct s2n_config_rc* config_rc = NULL;
+				if (i == objc-1) THROW_ERROR("Missing value for -config");
 				Tcl_Obj* cfg_obj = objv[++i];
-				TEST_OK_LABEL(finally, code, get_s2n_config_from_obj(interp, cfg_obj, &config_rc));
+				TEST_OK(get_s2n_config_from_obj(interp, cfg_obj, &config_rc));
 				// Retain the config at the C refcount layer — independent of
 				// the cfg_obj Tcl_Obj. If cfg_obj shimmers to another type
 				// (dict, list, string) later, its intrep drops its ref but
@@ -1119,44 +1088,47 @@ static OBJCMD(push_cmd) //<<<
 				tcls2n_config_rc_release(&con_cx->config);
 				con_cx->config = config_rc;
 				con_cx->config->refCount++;
-				TEST_OK_LABEL(finally, code, s2n_connection_set_config(con_cx->s2n_con, config_rc->c));
+				CHECK_S2N(s2n_connection_set_config(con_cx->s2n_con, config_rc->c));
 				break;
 			}
 			//>>>
-			case OPT_SERVERNAME: //<<<
-				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -servername", NULL);
-				CHECK_S2N(finally, code, s2n_set_server_name(con_cx->s2n_con, Tcl_GetString(objv[++i])));
+
+			case OPT_SERVERNAME:
+				if (i == objc-1) THROW_ERROR("Missing value for -servername");
+				CHECK_S2N(s2n_set_server_name(con_cx->s2n_con, Tcl_GetString(objv[++i])));
 				break;
-			//>>>
+
 			case OPT_PREFER: //<<<
 			{
 				static const char* s2n_prefer_str[] = { "throughput", "latency", NULL };
 				enum prefer { PREFER_THROUGHPUT, PREFER_LATENCY } prefer = PREFER_THROUGHPUT;
-				int	preferint;
+				int preferint;
 
-				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -prefer", NULL);
-				TEST_OK_LABEL(finally, code, Tcl_GetIndexFromObj(interp, objv[++i], s2n_prefer_str, "prefer", 0, &preferint));
+				if (i == objc-1) THROW_ERROR("Missing value for -prefer");
+				TEST_OK(Tcl_GetIndexFromObj(interp, objv[++i], s2n_prefer_str, "prefer", 0, &preferint));
 				prefer = preferint;
 				switch (prefer) {
-					case PREFER_THROUGHPUT: CHECK_S2N(finally, code, s2n_connection_prefer_throughput(con_cx->s2n_con));  break;
-					case PREFER_LATENCY:    CHECK_S2N(finally, code, s2n_connection_prefer_low_latency(con_cx->s2n_con)); break;
-					default: THROW_ERROR_LABEL(finally, code, "Unhandled prefer", objv[i]);
+					case PREFER_THROUGHPUT:	CHECK_S2N(s2n_connection_prefer_throughput(con_cx->s2n_con));	break;
+					case PREFER_LATENCY:	CHECK_S2N(s2n_connection_prefer_low_latency(con_cx->s2n_con));	break;
+					default:				THROW_ERROR("Unhandled prefer: ", Tcl_GetString(objv[i]));
 				}
 				break;
 			}
 			//>>>
-			default: THROW_ERROR_LABEL(finally, code, "Unhandled option", objv[i]);
+
+			default:
+				THROW_ERROR("Unhandled option: ", Tcl_GetString(objv[i]));
 		}
 	}
 
 	// Wire up IO callbacks to read and write to the base chan
-	CHECK_S2N(finally, code, s2n_connection_set_send_ctx(con_cx->s2n_con, con_cx));
-	CHECK_S2N(finally, code, s2n_connection_set_recv_ctx(con_cx->s2n_con, con_cx));
-	CHECK_S2N(finally, code, s2n_connection_set_send_cb(con_cx->s2n_con, s2n_basechan_send));
-	CHECK_S2N(finally, code, s2n_connection_set_recv_cb(con_cx->s2n_con, s2n_basechan_recv));
+	CHECK_S2N(s2n_connection_set_send_ctx(con_cx->s2n_con, con_cx));
+	CHECK_S2N(s2n_connection_set_recv_ctx(con_cx->s2n_con, con_cx));
+	CHECK_S2N(s2n_connection_set_send_cb(con_cx->s2n_con, s2n_basechan_send));
+	CHECK_S2N(s2n_connection_set_recv_cb(con_cx->s2n_con, s2n_basechan_recv));
 
 	CLOGS(HANDSHAKE, "s2n_negotiate");
-    const int neg_rc = s2n_negotiate(con_cx->s2n_con, &con_cx->blocked);
+	const int neg_rc = s2n_negotiate(con_cx->s2n_con, &con_cx->blocked);
 
 	if (neg_rc == S2N_SUCCESS) {
 		CLOGS(HANDSHAKE, "s2n_negotiate success");
@@ -1166,48 +1138,40 @@ static OBJCMD(push_cmd) //<<<
 		switch (s2n_error_get_type(s2n_errno)) {
 			case S2N_ERR_T_BLOCKED:
 			{
-				int		mask = 0;
+				int mask = 0;
 				switch (con_cx->blocked) {
-					case S2N_BLOCKED_ON_READ:	mask |= TCL_READABLE; break;
-					case S2N_BLOCKED_ON_WRITE:	mask |= TCL_WRITABLE; break;
-					default: break;
+					case S2N_BLOCKED_ON_READ:	mask |= TCL_READABLE;	break;
+					case S2N_BLOCKED_ON_WRITE:	mask |= TCL_WRITABLE;	break;
+					default:	break;
 				}
 				if (mask) {
-					CLOGS(HANDSHAKE, "s2n_negotiate blocked on %s, registering watch for %s", con_cx->blocked == S2N_BLOCKED_ON_READ ? "read" : "write", mask_str(mask));
-					Tcl_DriverWatchProc*	base_watch = Tcl_ChannelWatchProc(Tcl_GetChannelType(con_cx->basechan));
+					CLOGS(HANDSHAKE, "s2n_negotiate blocked on %s, registering watch for %s",
+							con_cx->blocked == S2N_BLOCKED_ON_READ ? "read" : "write", mask_str(mask));
+					Tcl_DriverWatchProc* base_watch = Tcl_ChannelWatchProc(Tcl_GetChannelType(con_cx->basechan));
 					base_watch(Tcl_GetChannelInstanceData(con_cx->basechan), mask);
 				}
 				break;
 			}
 
 			default:
-				THROW_ERROR_LABEL(finally, code, "s2n_negotiate failed: ", s2n_strerror(s2n_errno, "EN"));
+				THROW_ERROR("s2n_negotiate failed: ", s2n_strerror(s2n_errno, "EN"));
 		}
 	}
 
-	con_cx->chan = Tcl_StackChannel(interp, &s2n_stacked_channel_type, con_cx, TCL_READABLE | TCL_WRITABLE, basechan);
+	con_cx->chan = Tcl_StackChannel(interp, &s2n_stacked_channel_type, con_cx,
+			TCL_READABLE | TCL_WRITABLE, basechan);
 	register_chan(con_cx);
 	CLOGS(HANDSHAKE, "leaving push_cmd, handshake_done: %d", con_cx->handshake_done);
-	con_cx = NULL;	// Hand ownershop to the s2n_channel_type driver
-	stacked = 1;
-
-finally:
-	if (code != TCL_OK && stacked && con_cx) {
-		code = Tcl_UnstackChannel(interp, con_cx->chan);
-	}
-	if (con_cx) {
-		free_con_cx(con_cx);
-		con_cx = NULL;
-	}
-	return code;
+	con_cx = NULL;	// handoff to the s2n_stacked_channel_type driver; null so the
+					// defer becomes a no-op. Any close2Proc invocation from Tcl
+					// later will run free_con_cx via the driver vtable.
+	return TCL_OK;
 }
 
 //>>>
 static OBJCMD(socket_cmd) //<<<
 {
 	(void)cdata;
-	int				code = TCL_OK;
-	int				i;
 	static const char* opts[] = {
 		"-async",
 		"-config",
@@ -1221,42 +1185,61 @@ static OBJCMD(socket_cmd) //<<<
 		OPT_SERVERNAME,
 		OPT_PREFER,
 	};
-	struct con_cx		*con_cx = NULL;
-	int					registered = 0;
 	int					async = 0;
-	struct addrinfo*	addrs = NULL;
-	struct addrinfo		static_addr = {0};
-	struct sockaddr_un	uds = {
-		.sun_family		= AF_UNIX,
-	};
-	int					s = -1;	// socket
+	struct sockaddr_un	uds = {.sun_family = AF_UNIX};
+	int					s = -1;	// socket fd (pre-handoff)
 	int					connected = 0;
 
 	enum {A_cmd, A_x, A_y, A_args};
-	CHECK_MIN_ARGS_LABEL(finally, code, "?-opt val ...? host port");
+	CHECK_MIN_ARGS("?-opt val ...? host port");
 	const int A_HOST = objc-2;
 	const int A_PORT = objc-1;
 
-	con_cx = (struct con_cx*)ckalloc(sizeof *con_cx);
+	// defer { if (s != -1) close(s); } — raw fd ownership before handoff to con_cx
+	defer {
+		if (s != -1) {
+			if (-1 == close(s)) CLOGS(IO, "close failed: %s", strerror(errno));
+		}
+	}
+
+	struct con_cx* con_cx = (struct con_cx*)ckalloc(sizeof *con_cx);
 	*con_cx = (struct con_cx){
 		.type		= CHANTYPE_DIRECT,
 		.blocked	= S2N_NOT_BLOCKED,
 		.blocking	= 1,
 	};
 	CLOGS(LIFECYCLE, "Created con_cx: %s", clogs_name(con_cx));
+	// defer: if we leave without handing con_cx off to Tcl's channel driver,
+	// tear it down. If Tcl_RegisterChannel succeeded, the chan already owns
+	// con_cx — we'll Tcl_UnregisterChannel instead so the driver's close2Proc
+	// gets called (which will free con_cx via the regular close path).
+	Tcl_Channel chan_for_cleanup = NULL;
+	defer {
+		if (con_cx) {
+			if (chan_for_cleanup) {
+				Tcl_UnregisterChannel(interp, chan_for_cleanup);
+			} else {
+				free_con_cx(con_cx);
+			}
+		}
+	}
 
 	con_cx->s2n_con = s2n_connection_new(S2N_CLIENT);
 	CLOGS(LIFECYCLE, "Created s2n connection: %s", S2N_CON_NAME(con_cx->s2n_con));
 
 	Tcl_Size	host_len;
 	const char*	host = Tcl_GetStringFromObj(objv[A_HOST], &host_len);
+	struct addrinfo		static_addr = {0};
+	struct addrinfo*	addrs = NULL;
+	defer { if (addrs && addrs != &static_addr) freeaddrinfo(addrs); }
+
 	if (host_len == 0) {
 		// UDS mode: port is a path
 		Tcl_Size	pathlen;
-		const char* path	= Tcl_GetStringFromObj(objv[A_PORT], &pathlen);
+		const char*	path = Tcl_GetStringFromObj(objv[A_PORT], &pathlen);
 
 		if ((size_t)pathlen > sizeof(uds.sun_path)-1)
-			THROW_ERROR_LABEL(finally, code, "Path too long: ", Tcl_GetString(objv[A_PORT]));
+			THROW_ERROR("Path too long: ", Tcl_GetString(objv[A_PORT]));
 
 		strncpy(uds.sun_path, path, sizeof(uds.sun_path)-1);
 		uds.sun_path[sizeof(uds.sun_path)-1] = 0;
@@ -1267,12 +1250,11 @@ static OBJCMD(socket_cmd) //<<<
 			.ai_addr		= (struct sockaddr*)&uds,
 			.ai_addrlen		= sizeof(uds),
 		};
-
 		addrs = &static_addr;
 	} else {
 		// TCP mode: port is a port
-		const char*	serv	= Tcl_GetString(objv[A_PORT]);
-		struct addrinfo	hints = {
+		const char*	serv = Tcl_GetString(objv[A_PORT]);
+		struct addrinfo hints = {
 			.ai_family		= AF_UNSPEC,
 			.ai_socktype	= SOCK_STREAM,
 			.ai_protocol	= IPPROTO_TCP,
@@ -1280,80 +1262,72 @@ static OBJCMD(socket_cmd) //<<<
 
 		const int rc = getaddrinfo(host, serv, &hints, &addrs);
 		if (rc != 0)
-			THROW_ERROR_LABEL(finally, code, "couldn't open socket: ", gai_strerror(rc));
+			THROW_ERROR("couldn't open socket: ", gai_strerror(rc));
 
-		// Figure out if host is a numeric address or a hostname (to set the -servername default)
-		uint8_t		ignored[sizeof(struct in6_addr)];
-		if (
-			0 == inet_pton(AF_INET,  host, ignored) &&
-			0 == inet_pton(AF_INET6, host, ignored)
-		) {
-			CHECK_S2N(finally, code, s2n_set_server_name(con_cx->s2n_con, host));
-		}
+		// If host is a hostname (not a numeric address), use it as the default -servername
+		uint8_t ignored[sizeof(struct in6_addr)];
+		if (0 == inet_pton(AF_INET, host, ignored) && 0 == inet_pton(AF_INET6, host, ignored))
+			CHECK_S2N(s2n_set_server_name(con_cx->s2n_con, host));
 	}
 
-	for (i=A_x; i<A_HOST; i++) {
-		int			optint;
-		TEST_OK_LABEL(finally, code, Tcl_GetIndexFromObj(interp, objv[i], opts, "option", 0, &optint));
-		const enum opt	o = optint;
+	for (int i=A_x; i<A_HOST; i++) {
+		int optint;
+		TEST_OK(Tcl_GetIndexFromObj(interp, objv[i], opts, "option", 0, &optint));
+		const enum opt o = optint;
 		switch (o) {
-			case OPT_ASYNC: //<<<
+			case OPT_ASYNC:
 				async = 1;
 				con_cx->blocking = 0;
 				break;
-			//>>>
+
 			case OPT_CONFIG: //<<<
 			{
-				struct s2n_config_rc*	config_rc = NULL;
-				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -config", NULL);
+				struct s2n_config_rc* config_rc = NULL;
+				if (i == objc-1) THROW_ERROR("Missing value for -config");
 				Tcl_Obj* cfg_obj = objv[++i];
-				TEST_OK_LABEL(finally, code, get_s2n_config_from_obj(interp, cfg_obj, &config_rc));
-				// Retain the config at the C refcount layer — independent of
-				// the cfg_obj Tcl_Obj. If cfg_obj shimmers to another type
-				// (dict, list, string) later, its intrep drops its ref but
-				// ours keeps the struct s2n_config alive for as long as the
-				// connection lives.
+				TEST_OK(get_s2n_config_from_obj(interp, cfg_obj, &config_rc));
 				tcls2n_config_rc_release(&con_cx->config);
 				con_cx->config = config_rc;
 				con_cx->config->refCount++;
-				TEST_OK_LABEL(finally, code, s2n_connection_set_config(con_cx->s2n_con, config_rc->c));
+				CHECK_S2N(s2n_connection_set_config(con_cx->s2n_con, config_rc->c));
 				break;
 			}
 			//>>>
-			case OPT_SERVERNAME: //<<<
-				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -servername", NULL);
-				CHECK_S2N(finally, code, s2n_set_server_name(con_cx->s2n_con, Tcl_GetString(objv[++i])));
+
+			case OPT_SERVERNAME:
+				if (i == objc-1) THROW_ERROR("Missing value for -servername");
+				CHECK_S2N(s2n_set_server_name(con_cx->s2n_con, Tcl_GetString(objv[++i])));
 				break;
-			//>>>
+
 			case OPT_PREFER: //<<<
 			{
 				static const char* s2n_prefer_str[] = { "throughput", "latency", NULL };
 				enum prefer { PREFER_THROUGHPUT, PREFER_LATENCY } prefer = PREFER_THROUGHPUT;
-				int	preferint;
+				int preferint;
 
-				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -prefer", NULL);
-				TEST_OK_LABEL(finally, code, Tcl_GetIndexFromObj(interp, objv[++i], s2n_prefer_str, "prefer", 0, &preferint));
+				if (i == objc-1) THROW_ERROR("Missing value for -prefer");
+				TEST_OK(Tcl_GetIndexFromObj(interp, objv[++i], s2n_prefer_str, "prefer", 0, &preferint));
 				prefer = preferint;
 				switch (prefer) {
-					case PREFER_THROUGHPUT: CHECK_S2N(finally, code, s2n_connection_prefer_throughput(con_cx->s2n_con));  break;
-					case PREFER_LATENCY:    CHECK_S2N(finally, code, s2n_connection_prefer_low_latency(con_cx->s2n_con)); break;
-					default: THROW_ERROR_LABEL(finally, code, "Unhandled prefer", objv[i]);
+					case PREFER_THROUGHPUT:	CHECK_S2N(s2n_connection_prefer_throughput(con_cx->s2n_con));	break;
+					case PREFER_LATENCY:	CHECK_S2N(s2n_connection_prefer_low_latency(con_cx->s2n_con));	break;
+					default:				THROW_ERROR("Unhandled prefer: ", Tcl_GetString(objv[i]));
 				}
 				break;
 			}
 			//>>>
-			default: THROW_ERROR_LABEL(finally, code, "Unhandled option", objv[i]);
+
+			default:
+				THROW_ERROR("Unhandled option: ", Tcl_GetString(objv[i]));
 		}
 	}
 
 	for (struct addrinfo* addr=addrs; addr; addr=addr->ai_next) {
 		s = socket(addr->ai_family, addr->ai_socktype | (async ? SOCK_NONBLOCK : 0) | SOCK_CLOEXEC, addr->ai_protocol);
-
 		if (s == -1) {
 			CLOGS(IO, "socket failed: %s", strerror(errno));
 			continue;
 		}
-
 		if (-1 == connect(s, addr->ai_addr, addr->ai_addrlen)) {
 			if (errno == EINPROGRESS) {
 				CLOGS(IO, "connect in progress");
@@ -1364,22 +1338,24 @@ static OBJCMD(socket_cmd) //<<<
 				continue;
 			}
 		}
-
 		connected = 1;
 		break;
 	}
 
-	if (!connected)
-		THROW_POSIX_LABEL(finally, code, "couldn't open socket");
+	if (!connected) THROW_POSIX("couldn't open socket");
 
 	CLOGS(IO, "setting fd: %d", s);
-	con_cx->fd = s;		s = -1;		// Hand ownership to the channel driver context
-	CHECK_S2N(finally, code, s2n_connection_set_fd(con_cx->s2n_con, con_cx->fd));
+	con_cx->fd = s;
+	s = -1;		// handoff: con_cx owns the fd now; the s-defer becomes a no-op
+	CHECK_S2N(s2n_connection_set_fd(con_cx->s2n_con, con_cx->fd));
 
 	con_cx->chan = Tcl_CreateChannel(&s2n_direct_channel_type, clogs_name(con_cx), con_cx, TCL_READABLE | TCL_WRITABLE);
 	Tcl_RegisterChannel(interp, con_cx->chan);
 	register_chan(con_cx);
-	registered = 1;
+	chan_for_cleanup = con_cx->chan;	// signal to the defer: unregister chan
+										// on error-exit (which triggers close2Proc
+										// → free_con_cx) rather than calling
+										// free_con_cx directly.
 
 	if (async) {
 		CLOGS(IO, "async mode, registering watch for %s", mask_str(TCL_WRITABLE));
@@ -1398,46 +1374,33 @@ static OBJCMD(socket_cmd) //<<<
 			switch (s2n_error_get_type(s2n_errno)) {
 				case S2N_ERR_T_BLOCKED:
 				{
-					int		mask = 0;
+					int mask = 0;
 					switch (con_cx->blocked) {
-						case S2N_BLOCKED_ON_READ:	mask |= TCL_READABLE; break;
-						case S2N_BLOCKED_ON_WRITE:	mask |= TCL_WRITABLE; break;
-						default: break;
+						case S2N_BLOCKED_ON_READ:	mask |= TCL_READABLE;	break;
+						case S2N_BLOCKED_ON_WRITE:	mask |= TCL_WRITABLE;	break;
+						default:	break;
 					}
 					if (mask) {
-						CLOGS(HANDSHAKE, "s2n_negotiate blocked on %s, registering watch for %s", con_cx->blocked == S2N_BLOCKED_ON_READ ? "read" : "write", mask_str(mask));
+						CLOGS(HANDSHAKE, "s2n_negotiate blocked on %s, registering watch for %s",
+								con_cx->blocked == S2N_BLOCKED_ON_READ ? "read" : "write", mask_str(mask));
 						Tcl_CreateFileHandler(con_cx->fd, mask, s2n_direct_chan_handler, con_cx);
 					}
 					break;
 				}
 
 				default:
-					THROW_ERROR_LABEL(finally, code, "s2n_negotiate failed: ", s2n_strerror(s2n_errno, "EN"));
+					THROW_ERROR("s2n_negotiate failed: ", s2n_strerror(s2n_errno, "EN"));
 			}
 		}
 	}
 
 	Tcl_SetObjResult(interp, Tcl_NewStringObj(clogs_name(con_cx), -1));		// TODO: channelName with better guarantees of uniqueness
 
-	CLOGS(HANDSHAKE, "leaving push_cmd, handshake_done: %d", con_cx->handshake_done);
-	con_cx = NULL;	// Hand ownershop to the s2n_channel_type driver
-
-finally:
-	if (addrs && addrs != &static_addr) {
-		freeaddrinfo(addrs);
-		addrs = NULL;
-	}
-	if (s != -1) {
-		if (-1 == close(s)) CLOGS(IO, "close failed: %s", strerror(errno));
-		s = -1;
-	}
-	if (code != TCL_OK && registered && con_cx) {
-		code = Tcl_UnregisterChannel(interp, con_cx->chan);
-	} else if (con_cx) {
-		free_con_cx(con_cx);
-		con_cx = NULL;
-	}
-	return code;
+	CLOGS(HANDSHAKE, "leaving socket_cmd, handshake_done: %d", con_cx->handshake_done);
+	con_cx = NULL;		// handoff: null the local so the defer becomes a no-op.
+						// The Tcl_Channel already owns con_cx (established via
+						// Tcl_CreateChannel above).
+	return TCL_OK;
 }
 
 //>>>

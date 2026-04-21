@@ -1,5 +1,5 @@
 project('s2n', 'c',
-  version:          '0.8.0',
+  version:          '0.8.1',
   default_options:  ['c_std=c17', 'warning_level=2', 'werror=true'],
   meson_version:    '>=1.3.0',
 )
@@ -30,6 +30,7 @@ pkg_sources = files(
 )
 
 tea_want_shims = ['tip445']
+tea_want_defer = true
 
 # Teabase init: provides pkg_dir, tclsh, tcl_dep, teaconf
 #subdir('teabase/init')

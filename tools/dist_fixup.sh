@@ -27,10 +27,6 @@ if [ -f "$build/doc/README.md" ]; then
     cp "$build/doc/README.md" "$dist/README.md"
 fi
 
-# Bake the autotools configure script so consumers using the legacy
-# `./configure && make` path don't need autoconf installed themselves.
-( cd "$dist" && autoreconf -fi )
-
 # Drop large dep test vectors, language bindings, and fuzz corpora.
 # Without this the tarball is ~150 MB; after trimming it's ~64 MB.
 if [ -f "$dist/tools/trimdist.tcl" ]; then

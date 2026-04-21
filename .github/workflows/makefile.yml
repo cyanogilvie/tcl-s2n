@@ -12,7 +12,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          meson ninja-build cmake autoconf pandoc
+          meson ninja-build cmake pandoc
 
     - name: Cache Tcl 9.0.3 build
       id: cache-tcl9
@@ -46,20 +46,8 @@ jobs:
         meson compile -C build-meson
         meson test -C build-meson --print-errorlogs
 
-    - name: Build and test (autotools)
-      env:
-        PKG_CONFIG_PATH: /opt/tcl9/lib/pkgconfig
-      run: |
-        autoreconf -fi
-        ./configure --with-tcl=/opt/tcl9/lib
-        make
-        make test
-
     - name: Generate dist tarball
-      # --allow-dirty: the autotools step above leaves untracked artifacts
-      # in the working tree.  meson dist still only archives git-tracked
-      # files, so the dirt doesn't leak into the tarball.
-      run: meson dist -C build-meson --no-tests --allow-dirty --formats=gztar
+      run: meson dist -C build-meson --no-tests --formats=gztar
 
     - name: Upload tarball
       uses: actions/upload-artifact@v7

@@ -4,7 +4,7 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.8.0?
+**package require s2n** ?0.8.1?
 
 **s2n::push** *channelName* ?*-opt* *val* …?  
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -127,17 +127,16 @@ close $sock
 
 ## BUILDING
 
-This package needs Tcl 9.0 or 8.6 (or newer in either line). The s2n and
-aws-lc libraries it depends on are included as submodules (or baked into
-the release tarball) and are built and statically linked as part of the
-package build process — no other external dependencies.
+This package needs Tcl 9.0 or 8.6 (or newer in either line), and a C
+compiler with defer support — either native `_Defer` (clang 22+) or
+GCC’s `__attribute__((cleanup))` + nested-function polyfill (any recent
+gcc). The s2n and aws-lc libraries it depends on are included as
+submodules (or baked into the release tarball) and are built and
+statically linked as part of the package build process — no other
+external dependencies.
 
-The package supports two build systems: **meson** (preferred) and the
-legacy **autotools** path. The autotools build is in maintenance mode
-and will be removed in a future release; new features and CI run
-primarily against meson. The two paths produce identical binaries.
-
-### Meson (preferred)
+The package builds with **meson**. (The autotools build was removed in
+0.8.1 along with Windows support, which s2n-tls itself doesn’t support.)
 
 Meson and ninja need to be available on the build host. Most
 distributions package them:
@@ -146,19 +145,19 @@ e.g. `apt install meson ninja-build cmake pandoc` on Debian/Ubuntu
 optional and only needed if you want to (re)generate the manpage and
 README).
 
-#### From a release tarball
+### From a release tarball
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.0/s2n-0.8.0.tar.gz
-tar xf s2n-0.8.0.tar.gz
-cd s2n-0.8.0
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.1/s2n-0.8.1.tar.gz
+tar xf s2n-0.8.1.tar.gz
+cd s2n-0.8.1
 meson setup build
 meson compile -C build
 meson test -C build
 sudo meson install -C build
 ```
 
-#### From the git sources
+### From the git sources
 
 ``` sh
 git clone --recurse-submodules https://github.com/cyanogilvie/tcl-s2n
@@ -183,47 +182,6 @@ meson compile -C build deps-clean
 meson compile -C build
 ```
 
-### Autotools (legacy)
-
-#### From a release tarball
-
-``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.0/s2n-0.8.0.tar.gz
-tar xf s2n-0.8.0.tar.gz
-cd s2n-0.8.0
-./configure
-make
-sudo make install
-```
-
-#### From the git sources
-
-``` sh
-git clone --recurse-submodules https://github.com/cyanogilvie/tcl-s2n
-cd tcl-s2n
-autoconf
-./configure
-make
-sudo make install
-```
-
-#### In a Docker build
-
-Build from a specified release version, avoiding layer pollution and
-only adding the installed package without documentation to the image,
-and strip debug symbols, minimising image size:
-
-``` dockerfile
-WORKDIR /tmp/tcl-s2n
-RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.0/s2n-0.8.0.tar.gz -O - | tar xz --strip-components=1 && \
-    ./configure; make test install-binaries install-libraries && \
-    strip /usr/local/lib/libs2n*.so && \
-    cd .. && rm -rf tcl-s2n
-```
-
-Pass `--with-tcl /path/to/tcl/lib` to `configure` if your Tcl install is
-somewhere nonstandard.
-
 ### Testing
 
 Since this package deals with security-sensitive code, it’s a good idea
@@ -231,17 +189,14 @@ to run the test suite after building (especially in any automated build
 or CI/CD pipeline):
 
 ``` sh
-meson test -C build       # meson
-make test                 # autotools
+meson test -C build
 ```
 
-For deeper memory checking, run the suite under valgrind (requires that
-Tcl and this package are built with suitable memory debugging flags,
-like `CFLAGS="-DPURIFY -Og" --enable-symbols` for autotools or
-`meson setup build --buildtype=debug` for meson):
+For deeper memory checking, run the suite under valgrind (requires a
+debug build: `meson setup build --buildtype=debug`):
 
 ``` sh
-make valgrind
+meson test -C build --wrapper 'valgrind --trace-children=yes --leak-check=full'
 ```
 
 ## SECURITY
@@ -281,7 +236,7 @@ to use mlock. For example, using docker that looks like this:
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.8.0
+0.8.1
 tclsh8.7 [/here] 
 ```
 
@@ -292,7 +247,7 @@ cost of losing the mlock protection for key material):
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.8.0
+0.8.1
 tclsh8.7 [/here]
 ```
 
