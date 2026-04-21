@@ -111,6 +111,19 @@ struct con_cx {
 	int						read_closed;
 	int						write_closed;
 	int						registered;
+
+	// Refcounted handle on the underlying struct s2n_config. The config
+	// lifetime is tied to this handle's refcount, NOT to the lifetime of
+	// any Tcl_Obj. A Tcl_Obj only caches a reference in its intrep; when
+	// the Tcl_Obj shimmers to another type (dict, list, string...), its
+	// intrep reference is released but ours is not. When the last handle
+	// goes, s2n_config_free runs and the wrapper is ckfree'd.
+	struct s2n_config_rc*	config;
+};
+
+struct s2n_config_rc {
+	Tcl_Size			refCount;
+	struct s2n_config*	c;
 };
 
 #ifdef __cplusplus

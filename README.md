@@ -4,7 +4,7 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.7.1?
+**package require s2n** ?0.8.0?
 
 **s2n::push** *channelName* ?*-opt* *val* …?  
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -32,7 +32,7 @@ TLS client. See **OPTIONS** for the available options. If *host* is not
 a numeric address (IPv4 or IPv6) then it supplies the default for the
 **-servername** option. If *host* is given as an empty string, then
 *port* is taken to be a filesystem path and a connection is made to an
-AF_UNIX socket at that path.
+`AF_UNIX` socket at that path.
 
 ## OPTIONS
 
@@ -45,11 +45,11 @@ Set the role the TLS driver will play in the TLS handshake. If
 **client** (the default) the driver will initiate a TLS handshake
 otherwise it will wait to receive a ClientHello TLS message and
 handshake as a server. Only valid as an option to the **s2n::push**
-command, sockets opened using **s2n::socket** area always clients.
+command, sockets opened using **s2n::socket** are always clients.
 
 **-servername** *host*  
 Set the SNI (Server Name Indication) name to send when handshaking as a
-client. There is no default, if not present, the SNI extension won’t be
+client. There is no default - if not present, the SNI extension won’t be
 used. It’s also an error to set this option for server connections.
 
 **-prefer** **throughput**\|**latency**  
@@ -88,7 +88,24 @@ to encrypt but may still decrypt.
 **cipher_preferences** *policy*  
 Select the set of allowed ciphers and their preferences, via the
 *policy*, which is a security policy string as understood by s2n, like
-“default_tls13” or “20230317”.
+`default_tls13` or `20230317`.
+
+**ca_file** *path*  
+Path to a PEM-encoded file of trusted CA certificates to use for
+verifying the peer’s certificate chain. When set (together with, or
+instead of, **ca_dir**), the default system trust store is wiped first —
+the supplied CAs become the ONLY trust anchors. This matches the AWS
+CLI’s `AWS_CA_BUNDLE` semantics: a custom bundle replaces rather than
+augments system trust.
+
+**ca_dir** *path*  
+Path to a directory of PEM-encoded CA certificates in OpenSSL’s
+hashed-link layout (file names of the form `<hash>.0`). Same
+replacement-not-augmentation semantics as **ca_file**; the two may be
+combined — both locations contribute to the trust store.
+
+If neither **ca_file** nor **ca_dir** is set, the default system trust
+store is used as loaded by s2n at **package require** time.
 
 ## EXAMPLES
 
@@ -132,9 +149,9 @@ README).
 #### From a release tarball
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.1/s2n-0.7.1.tar.gz
-tar xf s2n-0.7.1.tar.gz
-cd s2n-0.7.1
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.0/s2n-0.8.0.tar.gz
+tar xf s2n-0.8.0.tar.gz
+cd s2n-0.8.0
 meson setup build
 meson compile -C build
 meson test -C build
@@ -171,9 +188,9 @@ meson compile -C build
 #### From a release tarball
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.1/s2n-0.7.1.tar.gz
-tar xf s2n-0.7.1.tar.gz
-cd s2n-0.7.1
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.0/s2n-0.8.0.tar.gz
+tar xf s2n-0.8.0.tar.gz
+cd s2n-0.8.0
 ./configure
 make
 sudo make install
@@ -198,7 +215,7 @@ and strip debug symbols, minimising image size:
 
 ``` dockerfile
 WORKDIR /tmp/tcl-s2n
-RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.7.1/s2n-0.7.1.tar.gz -O - | tar xz --strip-components=1 && \
+RUN wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.0/s2n-0.8.0.tar.gz -O - | tar xz --strip-components=1 && \
     ./configure; make test install-binaries install-libraries && \
     strip /usr/local/lib/libs2n*.so && \
     cd .. && rm -rf tcl-s2n
@@ -244,7 +261,7 @@ The s2n-tls library uses mlock by default to prevent memory containing
 key material from being paged to disk (where it could leak to other
 processes or be recovered by a later forensic analysis of the disk).
 Unfortunately containers default to removing the needed capability to
-allow that (IPC_LOCK). That manifests as an error thrown during s2n
+allow that (`IPC_LOCK`). That manifests as an error thrown during s2n
 initialisation:
 
 ``` sh
@@ -258,24 +275,24 @@ tclsh8.7 [/here]
 ```
 
 If you need to use this package in a container and are able to modify
-the capabilities then granting the IPC_LOCK capability will permit s2n
+the capabilities then granting the `IPC_LOCK` capability will permit s2n
 to use mlock. For example, using docker that looks like this:
 
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.7.1
+0.8.0
 tclsh8.7 [/here] 
 ```
 
-If you cannot add the IPC_LOCK capability then s2n’s use of mlock can be
-disabled by setting the S2N_DONT_MLOCK environment variable (at the cost
-of losing the mlock protection for key material):
+If you cannot add the `IPC_LOCK` capability then s2n’s use of mlock can
+be disabled by setting the `S2N_DONT_MLOCK` environment variable (at the
+cost of losing the mlock protection for key material):
 
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.7.1
+0.8.0
 tclsh8.7 [/here]
 ```
 
@@ -286,7 +303,7 @@ TODO
 ## AVAILABLE IN
 
 The most recent release of this package is available by default in the
-`alpine-tcl` container image: docker.io/cyanogilvie/alpine-tcl and the
+`alpine-tcl` container image: `docker.io/cyanogilvie/alpine-tcl` and the
 `cftcl` Tcl runtime snap: <https://github.com/cyanogilvie/cftcl>.
 
 ## SEE ALSO
@@ -297,7 +314,9 @@ library](https://github.com/aws/aws-lc).
 
 ## PROJECT STATUS
 
-This is a very early work in progress, but is in limited production use.
+The channel stacking mode **s2n::push** has been in heavy production use
+for some time and is mature. The direct socket mode **s2n::socket**,
+particularly in combination with `-async` is less well tested.
 
 With the nature of this package a lot of care is taken with memory
 handling and test coverage. There are no known memory leaks or errors,
@@ -305,14 +324,6 @@ and the package is routinely tested by running its test suite (which
 aims at full coverage) through valgrind. The `make valgrind`,
 `make test` and `make coverage` build targets support these goals. The
 test suite is currently a long way from full coverage.
-
-## BUGS
-
-There are currently problems with the **s2n::socket** command in
-**-async** mode, and handling of orphaned channels created by
-**s2n::socket** during process exit or unloading this extension’s dll,
-for now it is recommended to use the stacked channel approach with
-**s2n::push** instead.
 
 ## SOURCE CODE
 

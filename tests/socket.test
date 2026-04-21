@@ -1,8 +1,9 @@
 source [file join [file dirname [info script]] common.tcl]
 
 tcltest::testConstraint have_aio [expr {![catch {package require aio}]}]
+tcltest::testConstraint have_proc_fd [expr {[file readable /proc/self/fd]}]
 
-test socket-1.1 {Negotiate as a client with www.google.com, blocking basechan} -constraints knownBug -body { #<<<
+test socket-1.1 {Negotiate as a client with www.google.com, blocking basechan} -body { #<<<
 	set chans_before	[lsort [chan names]]
 	set sock	[s2n::socket www.google.com 443]
 	chan configure $sock -buffering none -translation crlf -encoding ascii
@@ -14,7 +15,7 @@ test socket-1.1 {Negotiate as a client with www.google.com, blocking basechan} -
 	unset -nocomplain sock
 } -match glob -result {HTTP/1.1 200 *}
 #>>>
-test socket-1.2 {Negotiate as a client with www.google.com, non-blocking basechan} -constraints {have_aio knownBug} -body { #<<<
+test socket-1.2 {Negotiate as a client with www.google.com, non-blocking basechan} -constraints have_aio -body { #<<<
 	set sock	[s2n::socket -async www.google.com 443]
 	chan configure $sock -blocking no -buffering none -translation crlf -encoding ascii
 	puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
@@ -45,19 +46,90 @@ test socket-3.1 {abandon connection, blocking, complete} -setup { #<<<
 	unset -nocomplain child status_line
 } -result {1 1}
 #>>>
-test socket-3.2 {abandon connection, nonblocking, in progress} -constraints knownBug -setup { #<<<
+test socket-3.2 {abandon connection, nonblocking, in progress} -setup { #<<<
 	set child	[interp create]
 	$child eval {load {} S2n}
 } -body {
 	$child eval {
 		set sock	[s2n::socket -async www.google.com 443]
-		chan configure $sock -blocking no -buffering none -translation crlf -encoding ascii
+		chan configure $sock -blocking no -buffering none -translation crlf -encoding iso8859-1
 		puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
 	}
 } -cleanup {
 	interp delete $child
 	unset -nocomplain child
-} -result xx
+} -result {}
+#>>>
+
+test socket-leak-1.1 {abandoned mid-handshake chans accumulate across child interp deletes} -constraints {knownBug have_proc_fd} -setup { #<<<
+	# Documents an fd-leak scenario. The scenario: peer accepts the TCP
+	# connection but never responds to the TLS ClientHello — a "silent drop"
+	# that's possible in the wild (e.g. misconfigured load balancer,
+	# firewalled port after SYN/ACK, half-open connection after peer crash).
+	#
+	# In the happy case (peer completes handshake, resets, or fully closes)
+	# the fd becomes readable, the notifier fires our chan handler,
+	# s2n_negotiate terminates with success or fatal error, BG_FLUSH_SCHEDULED
+	# clears, and Tcl's deferred close runs to completion — the chan is
+	# cleaned up naturally, no leak.
+	#
+	# In the silent-drop case there's no I/O event to fire the notifier,
+	# s2n_negotiate stays BLOCKED, BG_FLUSH_SCHEDULED never clears, and the
+	# chan sits in tsdPtr->firstCSPtr with an open fd forever — or until
+	# TCL_UNLOAD_DETACH_FROM_PROCESS runs at process exit.
+	#
+	# We DON'T force-close these at per-interp unload time: a straightforward
+	# "close my chans when my creating interp dies" breaks `chan transfer`
+	# and thread::attach patterns (common in threaded acceptor/worker
+	# servers), where a chan is intentionally kept alive in a different
+	# interp or thread. See S2n_Unload source comment for the rationale.
+	#
+	# Consequence: a long-running process that repeatedly creates+deletes
+	# child interps with in-flight s2n::socket handshakes against silent
+	# peers will leak one fd + one s2n_connection per abandonment until
+	# process exit, hitting RLIMIT_NOFILE after a few thousand iterations.
+	#
+	# Stand up a plain TCP listener that accepts but never speaks TLS to
+	# simulate the silent-peer case deterministically.
+	set listen	[socket -myaddr 127.0.0.1 -server {apply {{chan args} {
+		# accept, don't speak — peer gets stuck in s2n_negotiate
+		chan configure $chan -blocking 0
+	}}} 0]
+	set port	[lindex [chan configure $listen -sockname] 2]
+} -body {
+	# Baseline fd count. On Linux, /proc/self/fd/ has one entry per open fd.
+	set baseline	[llength [glob -nocomplain /proc/self/fd/*]]
+	set N	50
+	for {set i 0} {$i < $N} {incr i} {
+		set ci	[interp create]
+		$ci eval {load {} S2n}
+		$ci eval [list set port $port]
+		$ci eval {
+			set sock	[s2n::socket -async 127.0.0.1 $port]
+			chan configure $sock -blocking 0 -buffering none
+			# A queued write that can't go through until handshake completes —
+			# guarantees BG_FLUSH_SCHEDULED ends up set on the chan.
+			puts -nonewline $sock "GET / HTTP/1.1\r\nHost: x\r\n\r\n"
+		}
+		# interp delete tries to close sock but BG_FLUSH_SCHEDULED defers it;
+		# the chan becomes an orphan in tsdPtr->firstCSPtr. Our S2n_Unload
+		# only force-closes these at TCL_UNLOAD_DETACH_FROM_PROCESS time
+		# (i.e. process exit), NOT per-interp — because per-interp cleanup
+		# can't tell an abandoned chan from one that was chan-transfer'd to
+		# another live interp. See S2n_Unload source comment for rationale.
+		interp delete $ci
+	}
+	set delta	[expr {[llength [glob -nocomplain /proc/self/fd/*]] - $baseline}]
+	# On a correct implementation, delta is ~0 (the orphans would be cleaned
+	# up). With the current code it grows ~linearly with $N.
+	#
+	# The assertion is "delta is small enough that we're not leaking" —
+	# currently fails (delta ≈ $N), which is the bug this test documents.
+	expr {$delta < 5}
+} -cleanup {
+	if {[info exists listen] && $listen in [chan names]} {close $listen}
+	unset -nocomplain listen port N i ci sock baseline delta
+} -result 1
 #>>>
 
 # cleanup

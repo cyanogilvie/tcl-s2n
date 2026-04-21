@@ -636,35 +636,38 @@ static int s2n_common_chan_close2(ClientData cdata, Tcl_Interp* interp, int flag
 
 	} else if (flags == 0) {
 		CLOGS(LIFECYCLE, "closing connection %s", S2N_CON_NAME(con_cx->s2n_con));
-		if (con_cx->write_closed) {
-			goto close_sock;
-		} else {
+		if (!con_cx->write_closed) {
 			s2n_blocked_status	blocked = S2N_NOT_BLOCKED;
 			CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
 			const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
 			// TODO: Handle blocked?
-			if (rc == S2N_SUCCESS) {
-				goto close_sock;
-			} else {
-				switch (s2n_error_get_type(s2n_errno)) {
-					case S2N_ERR_T_BLOCKED:
-					case S2N_ERR_T_CLOSED:
-						goto close_sock;
-
-					case S2N_ERR_T_IO:
-						posixcode = errno;
-						goto set_interp_err_s2n_errno;
-
-					case S2N_ERR_T_PROTO:
-						posixcode = EPROTO;
-						goto set_interp_err_s2n_errno;
-
-					default:
-						posixcode = EINVAL;
-						goto set_interp_err_s2n_errno;
+			if (rc != S2N_SUCCESS) {
+				// s2n_shutdown couldn't send close_notify cleanly — maybe the
+				// handshake never completed (mid-negotiate abandon), maybe the
+				// peer hung up, maybe the call would block. Record the error
+				// on the interp but fall through to close_sock anyway: a
+				// failing TLS shutdown does NOT entitle us to leak the Tcl
+				// channel and its con_cx. Otherwise the channel lingers with
+				// a typePtr into our library's data segment, and Tcl's
+				// process-exit IO finalize crashes after the library has been
+				// unloaded by TclFinalizeLoad.
+				const int err_type = s2n_error_get_type(s2n_errno);
+				if (err_type == S2N_ERR_T_BLOCKED || err_type == S2N_ERR_T_CLOSED) {
+					// non-fatal: handshake incomplete / already closed
+				} else {
+					if (interp) {
+						Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_shutdown failed: %s", s2n_strerror(s2n_errno, "EN")));
+						Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
+					}
+					switch (err_type) {
+						case S2N_ERR_T_IO:		posixcode = errno ? errno : EIO;	break;
+						case S2N_ERR_T_PROTO:	posixcode = EPROTO;	break;
+						default:				posixcode = EINVAL;	break;
+					}
 				}
 			}
 		}
+		goto close_sock;
 
 	} else {
 		if (interp) {
@@ -702,10 +705,19 @@ close_sock:
 	{
 		const int is_direct	= con_cx->type == CHANTYPE_DIRECT;
 		int rc = 0;
-		if (is_direct) rc = close(con_cx->fd);
+		if (is_direct) {
+			// Remove Tcl's internal file handler before closing the fd;
+			// without this Tcl's notifier leaks its handler struct (fd
+			// lookup happens by integer, and a closed fd can't be matched).
+			Tcl_DeleteFileHandler(con_cx->fd);
+			rc = close(con_cx->fd);
+		}
 		free_con_cx(con_cx);
 		con_cx = NULL;
-		if (is_direct && rc == -1) {
+		if (is_direct && rc == -1 && posixcode == 0) {
+			// Only overwrite posixcode if we didn't already record a shutdown
+			// error above — the shutdown failure is more informative than the
+			// close() errno it'd typically come with.
 			posixcode = errno;
 			goto set_interp_err_errno;
 		}
@@ -823,20 +835,29 @@ Tcl_ObjType s2n_config_type = {
 	.dupIntRepProc	= dup_s2n_config_intrep,
 };
 
+// Drop one reference on an s2n_config_rc. When the last reference goes,
+// s2n_config_free the underlying C struct and release the wrapper.
+static void tcls2n_config_rc_release(struct s2n_config_rc** rc) //<<<
+{
+	if (*rc == NULL) return;
+	if (--(*rc)->refCount == 0) {
+		if ((*rc)->c) {
+			if (-1 == s2n_config_free((*rc)->c))
+				CLOGS(LIFECYCLE, "s2n_config_free failed: %s\n", s2n_strerror(s2n_errno, "EN"));
+			(*rc)->c = NULL;
+		}
+		ckfree(*rc);
+		*rc = NULL;
+	}
+}
+
+//>>>
 static void free_s2n_config_intrep(Tcl_Obj* obj) //<<<
 {
-	struct s2n_config*	config = NULL;
-
-	CLOGS(LIFECYCLE, "freeing config %s", clogs_name(obj));
+	CLOGS(LIFECYCLE, "freeing config intrep %s", clogs_name(obj));
 	forget_intrep(obj);
 	Tcl_ObjInternalRep*	ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
-	if (ir) {
-		config = (struct s2n_config*)ir->twoPtrValue.ptr1;
-		if (config) {
-			s2n_config_free(config);
-			config = NULL;
-		}
-	}
+	if (ir) tcls2n_config_rc_release((struct s2n_config_rc**)&ir->twoPtrValue.ptr1);
 }
 
 //>>>
@@ -848,32 +869,53 @@ static void dup_s2n_config_intrep(Tcl_Obj* src, Tcl_Obj* dst) //<<<
 }
 
 //>>>
-static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_config** config) //<<<
+// Build or recover an s2n_config_rc from a Tcl_Obj. The returned rc is NOT
+// ref-bumped by this call; callers that need to retain it past the life of
+// the Tcl_Obj (e.g. past a shimmer) must increment refCount themselves.
+static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_config_rc** config_rc) //<<<
 {
-	int					code = TCL_OK;
-	Tcl_DictSearch		search = {0};
-	Tcl_ObjInternalRep*	ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
-	struct s2n_config*	c = NULL;
+	int						code = TCL_OK;
+	Tcl_DictSearch			search = {0};
+	int						search_active = 0;	// only call Tcl_DictObjDone if we
+											// successfully started a search.
+											// Tcl 9's "no search" sentinel is
+											// search.epoch == 0 (zero-init OK), but
+											// Tcl 8.6's is search.epoch == -1 — so a
+											// zero-inited search NULL-derefs in 8.6
+											// if Tcl_DictObjFirst was never called.
+	Tcl_ObjInternalRep*		ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
+	struct s2n_config_rc*	rc = NULL;
 
 	if (!ir) {
 		Tcl_Obj*		key = NULL;
 		Tcl_Obj*		val = NULL;
 		int				done;
+		const char*		ca_file = NULL;		// buffered until after the dict walk — see below
+		const char*		ca_dir  = NULL;
 
-		c = s2n_config_new();
+		rc = (struct s2n_config_rc*)ckalloc(sizeof *rc);
+		*rc = (struct s2n_config_rc){0};
+		rc->refCount++;					// the intrep holds a reference
+		rc->c = s2n_config_new();
+		struct s2n_config* c = rc->c;	// alias for the per-key setters below
 
 		TEST_OK_LABEL(finally, code, Tcl_DictObjFirst(interp, obj, &search, &key, &val, &done));
+		search_active = 1;
 		for (; !done; Tcl_DictObjNext(&search, &key, &val, &done)) {
 			static const char* config_names[] = {
 				"session_tickets",
 				"ticket_lifetime",
 				"cipher_preferences",
+				"ca_file",
+				"ca_dir",
 				NULL
 			};
 			enum config {
 				CONFIG_SESSION_TICKETS,
 				CONFIG_TICKET_LIFETIME,
 				CONFIG_CIPHER_PREFERENCES,
+				CONFIG_CA_FILE,
+				CONFIG_CA_DIR,
 			} conf_name;
 			int conf_name_int;
 
@@ -908,33 +950,48 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 					CHECK_S2N(finally, code, s2n_config_set_cipher_preferences(c, Tcl_GetString(val)));
 					break;
 
+				case CONFIG_CA_FILE:
+					ca_file = Tcl_GetString(val);
+					break;
+
+				case CONFIG_CA_DIR:
+					ca_dir = Tcl_GetString(val);
+					break;
+
 				default: THROW_ERROR_LABEL(finally, code, "Unhandled config", key);
 			}
 		}
 
+		// Apply buffered ca_file / ca_dir as a single s2n call — the API accepts both at
+		// once (either may be NULL) and a caller dict that sets only ca_dir must not
+		// clobber an earlier ca_file (and vice-versa). Wipe the default trust store first
+		// so the supplied bundle *replaces* system roots — matches AWS CLI AWS_CA_BUNDLE
+		// semantics. See s2n.h:850-868 for the underlying API's additive default.
+		if (ca_file != NULL || ca_dir != NULL) {
+			CHECK_S2N(finally, code, s2n_config_wipe_trust_store(c));
+			CHECK_S2N(finally, code, s2n_config_set_verification_ca_location(c, ca_file, ca_dir));
+		}
+
 		Tcl_GetString(obj);	// Ensure that the string rep is generated before we take over the intrep - we can't generate our own
-		Tcl_StoreInternalRep(obj, &s2n_config_type, &(Tcl_ObjInternalRep){.twoPtrValue.ptr1 = c});
-		c = NULL;		// Hand ownership to the intrep
+		// The build-time refCount=1 (set at allocation) is repurposed as the
+		// intrep's reference now that StoreInternalRep succeeds. No extra ++ here.
+		Tcl_StoreInternalRep(obj, &s2n_config_type, &(Tcl_ObjInternalRep){.twoPtrValue.ptr1 = rc});
 		register_intrep(obj);
 		ir = Tcl_FetchInternalRep(obj, &s2n_config_type);
 		CLOGS(LIFECYCLE, "created config %s", clogs_name(obj));
+	} else {
+		rc = (struct s2n_config_rc*)ir->twoPtrValue.ptr1;
 	}
 
-	*config = (struct s2n_config*)ir->twoPtrValue.ptr1;
+	*config_rc = rc;
+	rc = NULL;	// caller takes it; don't release on the failure path
 
 finally:
-	Tcl_DictObjDone(&search);
-	if (c) {
-		if (-1 == s2n_config_free(c)) {
-			if (code == TCL_OK) {
-				code = TCL_ERROR;
-				Tcl_SetErrorCode(interp, "S2N", s2n_strerror_name(s2n_errno), NULL);
-				Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_config_free failed: %s", s2n_strerror(s2n_errno, "EN")));
-				s2n_errno = S2N_ERR_T_OK;
-			}
-		}
-		c = NULL;
-	}
+	if (search_active) Tcl_DictObjDone(&search);
+	// Error path before StoreInternalRep: rc still has its build-time
+	// refCount=1 from allocation. Release it — refCount drops to 0 and
+	// rc + rc->c get freed.
+	tcls2n_config_rc_release(&rc);
 	return code;
 }
 
@@ -950,6 +1007,7 @@ void free_con_cx(struct con_cx* con_cx) //<<<
 		}
 		con_cx->s2n_con = NULL;
 	}
+	tcls2n_config_rc_release(&con_cx->config);
 	ckfree(con_cx); con_cx = NULL;
 }
 
@@ -1049,11 +1107,19 @@ static OBJCMD(push_cmd) //<<<
 			case OPT_ROLE:	i++; break;		// Handled above
 			case OPT_CONFIG: //<<<
 			{
-				struct s2n_config*	config = NULL;
+				struct s2n_config_rc*	config_rc = NULL;
 				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -config", NULL);
-				TEST_OK_LABEL(finally, code, get_s2n_config_from_obj(interp, objv[++i], &config));
-				// TODO: need to take a ref on the config obj, in the stack chan's instance data?
-				TEST_OK_LABEL(finally, code, s2n_connection_set_config(con_cx->s2n_con, config));
+				Tcl_Obj* cfg_obj = objv[++i];
+				TEST_OK_LABEL(finally, code, get_s2n_config_from_obj(interp, cfg_obj, &config_rc));
+				// Retain the config at the C refcount layer — independent of
+				// the cfg_obj Tcl_Obj. If cfg_obj shimmers to another type
+				// (dict, list, string) later, its intrep drops its ref but
+				// ours keeps the struct s2n_config alive for as long as the
+				// connection lives.
+				tcls2n_config_rc_release(&con_cx->config);
+				con_cx->config = config_rc;
+				con_cx->config->refCount++;
+				TEST_OK_LABEL(finally, code, s2n_connection_set_config(con_cx->s2n_con, config_rc->c));
 				break;
 			}
 			//>>>
@@ -1238,11 +1304,19 @@ static OBJCMD(socket_cmd) //<<<
 			//>>>
 			case OPT_CONFIG: //<<<
 			{
-				struct s2n_config*	config = NULL;
+				struct s2n_config_rc*	config_rc = NULL;
 				if (i == objc-1) THROW_ERROR_LABEL(finally, code, "Missing value for -config", NULL);
-				TEST_OK_LABEL(finally, code, get_s2n_config_from_obj(interp, objv[++i], &config));
-				// TODO: need to take a ref on the config obj, in the stack chan's instance data?
-				TEST_OK_LABEL(finally, code, s2n_connection_set_config(con_cx->s2n_con, config));
+				Tcl_Obj* cfg_obj = objv[++i];
+				TEST_OK_LABEL(finally, code, get_s2n_config_from_obj(interp, cfg_obj, &config_rc));
+				// Retain the config at the C refcount layer — independent of
+				// the cfg_obj Tcl_Obj. If cfg_obj shimmers to another type
+				// (dict, list, string) later, its intrep drops its ref but
+				// ours keeps the struct s2n_config alive for as long as the
+				// connection lives.
+				tcls2n_config_rc_release(&con_cx->config);
+				con_cx->config = config_rc;
+				con_cx->config->refCount++;
+				TEST_OK_LABEL(finally, code, s2n_connection_set_config(con_cx->s2n_con, config_rc->c));
 				break;
 			}
 			//>>>
@@ -1399,6 +1473,7 @@ static struct cmd {
 	{NS "::openssl_version",	openssl_version_cmd,	NULL},
 	{0}
 };
+
 // Script API >>>
 
 #ifdef __cplusplus
@@ -1504,7 +1579,96 @@ DLLEXPORT int S2n_Unload(Tcl_Interp* interp, int flags) //<<<
 	Tcl_DeleteAssocData(interp, PACKAGE_NAME);	// Have to do this here, otherwise Tcl will try to call it after we're unloaded
 
 	if (flags == TCL_UNLOAD_DETACH_FROM_PROCESS) {
+		// We DELIBERATELY do not clean up abandoned channels on
+		// TCL_UNLOAD_DETACH_FROM_INTERPRETER. Doing so would leak fds and
+		// memory when child interps with -async s2n::sockets get deleted
+		// mid-handshake in a long-running process (see the knownBug test
+		// socket-leak-*). A naive per-interp cleanup is dangerous:
+		//   - con_cx has no reliable "owning interp" field: chan transfer
+		//     moves a channel between interps (common in threaded
+		//     acceptor/worker server patterns); thread::attach moves it
+		//     between threads. A transferred chan may be intentionally
+		//     alive and well in a completely different interp.
+		//   - Tcl has no public API to ask "is this channel still referenced
+		//     by any interp" — only the now-stale cached pointer we'd have
+		//     at chan-create time.
+		//   - Closing a perfectly-good chan because its creating interp
+		//     happens to be shutting down is a correctness bug that's far
+		//     worse than the fd leak.
+		// So: we accept the leak for TCL_UNLOAD_DETACH_FROM_INTERPRETER and
+		// only force-close at process unload time.
+
 		g_unloading = 1;
+
+		// Order matters: close managed channels first, THEN free intreps,
+		// THEN s2n_cleanup_final. Each con_cx->config holds a reference on
+		// an s2n_config_rc; closing the channel releases that ref. With the
+		// refcount wrapper the ordering is less critical than it was with
+		// the Tcl_Obj-linked scheme (freeing the intrep just drops one
+		// ref), but closing chans first is still cleaner: it ensures all
+		// s2n_connections are gone before s2n_cleanup_final runs.
+		//
+		// Safety note for Tcl_NotifyChannel below: FlushChannel with
+		// calledFromAsyncFlush=1 calls our outputProc synchronously.
+		// g_unloading (set just above) short-circuits outputProc to return
+		// -1/ENOTCONN immediately — no s2n call, no socket I/O, no retry
+		// on EAGAIN. FlushChannel's fatal-error branch (tclIO.c:2904)
+		// discards the queue and returns. This is why Tcl_NotifyChannel
+		// here can't block. If you reuse this pattern OUTSIDE the global-
+		// unload context (i.e. without g_unloading), that guarantee is
+		// gone — plan to close con_cx->fd first so s2n_send fails fatally.
+		Tcl_MutexLock(&g_init_mutex);
+		if (g_init) {
+			Tcl_HashEntry*	he;
+			Tcl_HashSearch	search;
+			CLOGS(LIFECYCLE, "closing managed channels");
+			while ((he = Tcl_FirstHashEntry(&g_managed_chans, &search))) {
+				struct con_cx*	con_cx = (struct con_cx*)Tcl_GetHashValue(he);
+				Tcl_Channel		chan = con_cx->chan;
+				if (con_cx->type == CHANTYPE_STACKED) {
+					CLOGS(LIFECYCLE, "unstacking stacked channel: %s", clogs_name(con_cx));
+					Tcl_UnstackChannel(interp, chan);
+				} else {
+					// Any direct chan still in our hash at DETACH_FROM_PROCESS
+					// time is one that Tcl couldn't close cleanly — e.g. an
+					// s2n::socket -async abandoned mid-handshake. The flush
+					// during the owner's interp delete returned EAGAIN from
+					// our outputProc, Tcl set BG_FLUSH_SCHEDULED, deferred
+					// close2(0), and the chan stayed alive in tsdPtr->firstCSPtr.
+					//
+					// A naive close from here loops: FlushChannel returns 0
+					// immediately when BG_FLUSH_SCHEDULED is set (tclIO.c:2786),
+					// so CloseChannel — and therefore close2(0) — is never
+					// reached and the chan stays in our hash.
+					//
+					// Tcl_NotifyChannel(chan, TCL_WRITABLE) drives FlushChannel
+					// with calledFromAsyncFlush=1 (tclIO.c:8627), which bypasses
+					// the early return. With g_unloading set, our outputProc
+					// returns -1/ENOTCONN, FlushChannel hits its fatal-error
+					// branch (tclIO.c:2904), DiscardOutputQueued's the queued
+					// bytes, breaks out of the write loop, and the post-loop
+					// block at tclIO.c:2950 ResetFlag's BG_FLUSH_SCHEDULED
+					// because the queue is now empty.
+					//
+					// After that, Tcl_UnregisterChannel goes through normally:
+					// refCount is already 0 (decremented by the owner interp's
+					// DeleteChannelTable), DetachChannel(NULL, chan) drops it
+					// to -1, and then TclClose runs — CHANNEL_CLOSED set,
+					// FlushChannel without the early return, CloseChannel
+					// preconditions met. Tcl frees the Channel/ChannelState
+					// structs while our close2Proc(0) frees con_cx.
+					//
+					// Per the docs (Tcl_RegisterChannel manpage), a channel
+					// that has ever been registered must be closed via
+					// Tcl_UnregisterChannel rather than Tcl_Close, so we use
+					// the former even though refCount is already 0.
+					CLOGS(LIFECYCLE, "draining and closing direct channel: %s", clogs_name(con_cx));
+					Tcl_NotifyChannel(chan, TCL_WRITABLE);
+					Tcl_UnregisterChannel(NULL, chan);
+				}
+			}
+			Tcl_DeleteHashTable(&g_managed_chans);
+		}
 
 		Tcl_MutexLock(&g_intreps_mutex);
 		if (g_intreps_init) {
@@ -1521,38 +1685,19 @@ DLLEXPORT int S2n_Unload(Tcl_Interp* interp, int flags) //<<<
 		}
 		Tcl_MutexUnlock(&g_intreps_mutex);
 		Tcl_MutexFinalize(&g_intreps_mutex);
-		g_intreps_mutex = NULL;
 
-		Tcl_MutexLock(&g_init_mutex);
 		if (g_init) {
-			Tcl_HashEntry*	he;
-			Tcl_HashSearch	search;
-			CLOGS(LIFECYCLE, "closing managed channels");
-			while ((he = Tcl_FirstHashEntry(&g_managed_chans, &search))) {
-				struct con_cx*	con_cx = (struct con_cx*)Tcl_GetHashValue(he);
-				if (con_cx->type == CHANTYPE_STACKED) {
-					CLOGS(LIFECYCLE, "unstacking stacked channel: %s", clogs_name(con_cx));
-					Tcl_UnstackChannel(interp, con_cx->chan);
-				} else {
-					CLOGS(LIFECYCLE, "unregistering channel: %s", clogs_name(con_cx));
-					// TODO: figure out the correct approach here.  All of these seem wrong
-					//Tcl_Close(interp, con_cx->chan);
-					//Tcl_UnregisterChannel(interp, con_cx->chan);
-					//Tcl_UnstackChannel(interp, con_cx->chan);
-					Tcl_DeleteChannelHandler(con_cx->chan, s2n_direct_chan_handler, con_cx);
-					Tcl_DeleteHashEntry(he);
-				}
-			}
-			Tcl_DeleteHashTable(&g_managed_chans);
-
-			CLOGS(LIFECYCLE, "calling s2n_cleanup");
-			if (-1 == s2n_cleanup())
-				Tcl_Panic("s2n_cleanup failed: %s\n", s2n_strerror(s2n_errno, "EN"));
+			// Explicit unload: run s2n_cleanup_final now so the caller's
+			// expected side-effect (the library is fully released) happens
+			// synchronously. The atexit handler registered by s2n_init
+			// guards with its own "initialized" flag and becomes a no-op.
+			CLOGS(LIFECYCLE, "calling s2n_cleanup_final");
+			if (-1 == s2n_cleanup_final())
+				Tcl_Panic("s2n_cleanup_final failed: %s\n", s2n_strerror(s2n_errno, "EN"));
 			g_init = 0;
 		}
 		Tcl_MutexUnlock(&g_init_mutex);
 		Tcl_MutexFinalize(&g_init_mutex);
-		g_init_mutex = NULL;
 	}
 
 	CLOGS(LIFECYCLE, "<-- unloading %s", clogs_name(interp));

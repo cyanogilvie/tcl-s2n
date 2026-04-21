@@ -68,6 +68,109 @@ test push-3.2 {abandon connection, nonblocking, in progress} -setup { #<<<
 	unset -nocomplain child
 } -result {}
 #>>>
+test push-ca-1.1 {ca_file in config dict: empty PEM bundle fails handshake} -body { #<<<
+	set empty_bundle	/tmp/rl_http_empty_bundle-[pid].pem
+	set fh		[open $empty_bundle w]; close $fh
+	set sock	[socket www.google.com 443]
+	s2n::push $sock -servername www.google.com -role client -config [list ca_file $empty_bundle]
+} -cleanup {
+	if {[info exists sock] && $sock in [chan names]} {close $sock}
+	file delete -force $empty_bundle
+	unset -nocomplain sock fh empty_bundle
+} -returnCodes error -match glob -result {*}
+#>>>
+test push-ca-1.2 {ca_file in config dict: bogus path fails config build} -body { #<<<
+	set sock	[socket www.google.com 443]
+	s2n::push $sock -servername www.google.com -role client -config {ca_file /nonexistent/bundle-xyz.pem}
+} -cleanup {
+	if {[info exists sock] && $sock in [chan names]} {close $sock}
+	unset -nocomplain sock
+} -returnCodes error -match glob -result {*}
+#>>>
+test push-ca-2.1 {ca_file pointing at the system bundle succeeds} -constraints have_aio -body { #<<<
+	set sock	[socket www.google.com 443]
+	s2n::push $sock -servername www.google.com -role client -config {ca_file /etc/ssl/certs/ca-certificates.crt}
+	chan configure $sock -buffering none -translation crlf -encoding iso8859-1
+	puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	read $sock
+} -cleanup {
+	if {[info exists sock] && $sock in [chan names]} {close $sock}
+	unset -nocomplain sock
+} -match glob -result {HTTP/1.1 200 *}
+#>>>
+test push-config-shimmer-1.1 {config Tcl_Obj shimmered to dict after push must not UAF the s2n_config} -body { #<<<
+	# Build a config dict in a variable. The first s2n::push call will
+	# extract the struct s2n_config and cache it as an intrep on $config_dict.
+	set config_dict	{ca_file /etc/ssl/certs/ca-certificates.crt}
+
+	set sock	[socket www.google.com 443]
+	s2n::push $sock -servername www.google.com -role client -config $config_dict
+
+	# Force the Tcl_Obj to shimmer to the dict type. If the Tcl_Obj is the
+	# ONLY handle on the struct s2n_config (no independent C-level refcount),
+	# freeing the s2n_config intrep now leaves the s2n_connection with a
+	# dangling pointer — subsequent reads/writes dereference freed memory.
+	dict size $config_dict
+	string length $config_dict
+	llength $config_dict
+
+	# Exercise the connection — s2n_recv internally follows the config pointer.
+	chan configure $sock -buffering none -translation crlf -encoding iso8859-1
+	puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	read $sock
+} -cleanup {
+	if {[info exists sock] && $sock in [chan names]} {close $sock}
+	unset -nocomplain sock config_dict
+} -match glob -result {HTTP/1.1 *}
+#>>>
+test push-config-shimmer-1.2 {shimmer to list type, then exercise the connection} -body { #<<<
+	# list-type shimmer exercises a different Tcl Tcl_ObjType code path than
+	# dict; ensure either/both can free the s2n_config intrep safely.
+	set config_dict	{ca_file /etc/ssl/certs/ca-certificates.crt}
+
+	set sock	[socket www.google.com 443]
+	s2n::push $sock -servername www.google.com -role client -config $config_dict
+
+	llength $config_dict
+	lindex  $config_dict 0
+
+	chan configure $sock -buffering none -translation crlf -encoding iso8859-1
+	puts -nonewline $sock "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	read $sock
+} -cleanup {
+	if {[info exists sock] && $sock in [chan names]} {close $sock}
+	unset -nocomplain sock config_dict
+} -match glob -result {HTTP/1.1 *}
+#>>>
+test push-config-shimmer-1.3 {multiple connections over a shared, shimmered config} -body { #<<<
+	# The Tcl_Obj is shared across two pushes and a shimmer between them. Both
+	# connections must see a valid config through reads.
+	set config_dict	{ca_file /etc/ssl/certs/ca-certificates.crt}
+
+	set sock1	[socket www.google.com 443]
+	s2n::push $sock1 -servername www.google.com -role client -config $config_dict
+
+	dict size $config_dict    ;# shimmer away the s2n_config intrep
+
+	set sock2	[socket www.google.com 443]
+	s2n::push $sock2 -servername www.google.com -role client -config $config_dict
+
+	chan configure $sock1 -buffering none -translation crlf -encoding iso8859-1
+	chan configure $sock2 -buffering none -translation crlf -encoding iso8859-1
+	puts -nonewline $sock1 "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	puts -nonewline $sock2 "HEAD / HTTP/1.1\nHost: www.google.com\nConnection: close\nUser-Agent: TLS test\n\n"
+	list	[string match "HTTP/1.1 *" [read $sock1]] \
+			[string match "HTTP/1.1 *" [read $sock2]]
+} -cleanup {
+	foreach s {sock1 sock2} {
+		if {[info exists $s]} {
+			set sv [set $s]
+			if {$sv in [chan names]} {close $sv}
+		}
+	}
+	unset -nocomplain sock1 sock2 config_dict
+} -result {1 1}
+#>>>
 test push-4.1 {negotiation failed early, nonblocking} -setup { #<<<
 } -body {
 	set sock	[socket api.sandbox.paypal.com 443]

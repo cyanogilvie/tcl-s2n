@@ -1,5 +1,5 @@
 project('s2n', 'c',
-  version:          '0.7.1',
+  version:          '0.8.0',
   default_options:  ['c_std=c17', 'warning_level=2', 'werror=true'],
   meson_version:    '>=1.3.0',
 )
@@ -19,6 +19,8 @@ add_project_arguments(cc.get_supported_arguments([
 ]), language: 'c')
 
 conf = configuration_data()
+
+conf.set10('UNLOAD', get_option('unload'))
 
 deps = []
 inc = [include_directories('generic')]
