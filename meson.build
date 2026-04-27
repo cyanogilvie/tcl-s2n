@@ -1,5 +1,5 @@
 project('s2n', 'c',
-  version:          '0.8.1',
+  version:          '0.8.2',
   default_options:  ['c_std=c17', 'warning_level=2', 'werror=true'],
   meson_version:    '>=1.3.0',
 )
@@ -48,6 +48,29 @@ deps += dependency('clogs',
 )
 
 subdir('teabase')
+
+# pkg-config metadata so downstream consumers can locate this install
+# uniformly. See parse_args/meson.build for the same pattern.
+pc_conf = configuration_data()
+pc_conf.set('PACKAGE_NAME',     meson.project_name())
+pc_conf.set('PACKAGE_VERSION',  meson.project_version())
+pc_conf.set('PKG_DIR_BASENAME', meson.project_name() + '-' + meson.project_version())
+configure_file(
+  input:          'tcl-' + meson.project_name() + '.pc.in',
+  output:         'tcl-' + meson.project_name() + '.pc',
+  configuration:  pc_conf,
+  install:        not meson.is_subproject(),
+  install_dir:    tcl_dep.get_variable('libdir') / 'pkgconfig',
+)
+
+s2n_dep = declare_dependency(
+  variables: {
+    'tcl_pkg_path': fs.parent(pkg_so.full_path()),
+    'version':      meson.project_version(),
+  },
+)
+meson.override_dependency(meson.project_name(), s2n_dep)
+
 subdir('doc')
 
 # `meson dist` fixup: bake configure, trim dep test vectors.
