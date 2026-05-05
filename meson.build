@@ -1,5 +1,5 @@
 project('s2n', 'c',
-  version:          '0.8.2',
+  version:          '0.8.3',
   default_options:  ['c_std=c17', 'warning_level=2', 'werror=true'],
   meson_version:    '>=1.3.0',
 )
@@ -59,17 +59,23 @@ configure_file(
   input:          'tcl-' + meson.project_name() + '.pc.in',
   output:         'tcl-' + meson.project_name() + '.pc',
   configuration:  pc_conf,
-  install:        not meson.is_subproject(),
+  install:        true,
   install_dir:    tcl_dep.get_variable('libdir') / 'pkgconfig',
+  install_tag:    meson.is_subproject() ? 'deps' : 'runtime',
 )
 
-s2n_dep = declare_dependency(
+# Published name is 'tcl-s2n' (.pc file, wrap dependency_names) but
+# meson.project_name() is 's2n'.  Override + variable name need to
+# match how consumers look up the dep ('tcl-s2n', with the fallback
+# variable spelled `tcl_s2n_dep` since `tcl-s2n_dep` isn't a valid
+# meson identifier).
+tcl_s2n_dep = declare_dependency(
   variables: {
     'tcl_pkg_path': fs.parent(pkg_so.full_path()),
     'version':      meson.project_version(),
   },
 )
-meson.override_dependency(meson.project_name(), s2n_dep)
+meson.override_dependency('tcl-s2n', tcl_s2n_dep)
 
 subdir('doc')
 
