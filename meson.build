@@ -1,5 +1,5 @@
 project('s2n', 'c',
-  version:          '0.8.3',
+  version:          '0.8.4',
   default_options:  ['c_std=c17', 'warning_level=2', 'werror=true'],
   meson_version:    '>=1.3.0',
 )

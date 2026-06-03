@@ -23,7 +23,11 @@ set hitlist	{}
 foreach {base pattern} {
 	deps/aws-lc/third_party			wycheproof_testvectors
 	deps/aws-lc/generated-src		crypto_test_data.cc
+	deps/aws-lc/generated-src		crypto_test_data.cc.tar.bz2
 	deps/aws-lc/crypto				*.txt
+	deps/aws-lc/crypto/hpke			test-vectors.json
+	deps/aws-lc/crypto/fipsmodule	policydocs
+	deps/aws-lc/util/fipstools/acvp/acvptool	test
 	deps/aws-lc						vectors
 	deps/aws-lc						testdata
 	deps/aws-lc						testvectors
@@ -32,9 +36,11 @@ foreach {base pattern} {
 	deps/aws-lc						fuzz
 	deps/aws-lc						*_tests.txt
 	deps/aws-lc						*.go
+	deps/s2n-tls					docs
 	deps/s2n-tls					bindings
 	deps/s2n-tls					fuzz
 	deps/s2n-tls					compliance
+	deps/s2n-tls					tests
 } {
 	lappend hitlist {*}[find $base $pattern fn {
 		switch -glob -- $fn {
