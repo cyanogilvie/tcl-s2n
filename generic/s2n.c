@@ -495,6 +495,9 @@ static int s2n_common_chan_input(ClientData cdata, char* buf, int toRead, int* e
 			remain -= got;
 			read_total += got;
 			con_cx->read_count += got;
+			// Return what's here rather than reading more from the base channel: in blocking
+			// mode that waits for the peer, which may be waiting for us
+			if (s2n_peek(con_cx->s2n_con) == 0) break;
 		} else if (got == 0) {
 			con_cx->read_closed = 1;
 			break;

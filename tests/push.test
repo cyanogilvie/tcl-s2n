@@ -171,6 +171,26 @@ test push-config-shimmer-1.3 {multiple connections over a shared, shimmered conf
 	unset -nocomplain sock1 sock2 config_dict
 } -result {1 1}
 #>>>
+test push-5.1 {blocking basechan: a reply shorter than the read buffer comes back, and a second request follows on the connection} -body { #<<<
+	# The input proc used to keep calling s2n_recv until it had the whole buffer Tcl asked for, so
+	# in blocking mode a short reply waited on the peer, which was waiting for us (and a Postgres
+	# server then ended the TLS session).  A regression hangs here, until meson test's timeout
+	set sock	[socket www.google.com 443]
+	s2n::push $sock -servername www.google.com -role client
+	chan configure $sock -blocking 1 -buffering full -translation binary
+	set statuses	{}
+	foreach i {1 2} {
+		puts -nonewline $sock "HEAD / HTTP/1.1\r\nHost: www.google.com\r\nUser-Agent: TLS test\r\n\r\n"
+		flush $sock
+		lappend statuses [string trim [gets $sock]]
+		while {[gets $sock line] >= 0 && $line ne "\r"} {}
+	}
+	set statuses
+} -cleanup {
+	if {[info exists sock] && $sock in [chan names]} {close $sock}
+	unset -nocomplain sock statuses i line
+} -match glob -result {{HTTP/1.1 200 *} {HTTP/1.1 200 *}}
+#>>>
 test push-4.1 {negotiation failed early, nonblocking} -setup { #<<<
 } -body {
 	set sock	[socket api.sandbox.paypal.com 443]
