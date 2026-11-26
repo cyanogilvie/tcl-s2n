@@ -4,9 +4,9 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.8.1?
+**package require s2n** ?0.8.5?
 
-**s2n::push** *channelName* ?*-opt* *val* …?  
+**s2n::push** *channelName* ?*-opt* *val* …?\
 **s2n::socket** ?*-opt* *val* …? *host* *port*
 
 ## DESCRIPTION
@@ -56,6 +56,16 @@ used. It’s also an error to set this option for server connections.
 Tune the implementation to optimise for throughput (large frames, fewer
 syscalls) or latency (smaller frames, more syscalls). TODO: figure out
 the default.
+
+**-blinding** **builtin**\|**self**  
+How s2n blinds an error: a mitigation against timing side channels,
+which delays the end of a connection after s2n detects tampering or a
+broken handshake. With **builtin** (the default) s2n sleeps the calling
+thread for 10 to 30 seconds, which stops every other connection a
+single-threaded, event-driven program is serving. With **self** it
+doesn’t sleep: after a read or write fails, the channel’s
+**-blinding_delay** says how long to wait before closing it, which the
+program can do with **after** while it serves the others.
 
 **-async**  
 Only valid for **s2n::socket**: don’t block on establishing the
@@ -107,6 +117,28 @@ combined — both locations contribute to the trust store.
 If neither **ca_file** nor **ca_dir** is set, the default system trust
 store is used as loaded by s2n at **package require** time.
 
+**certificates** {{*chain_pem* *key_pem*} …}  
+A server’s certificates, for **-role server**: a list of pairs, each a
+certificate chain (PEM, the leaf first) and its private key (PEM). s2n
+chooses the one whose names match the server name the client sent (SNI),
+or the first when none does. A server needs at least one: without it no
+handshake can complete. The same *config* value can be used for many
+connections; its certificates are loaded once.
+
+## CHANNEL OPTIONS
+
+Besides the options above, **chan configure** reads these from a TLS
+channel:
+
+**-server_supports**, **-client_supports**, **-protocol**  
+The TLS protocol versions the server and client support, and the one
+negotiated.
+
+**-blinding_delay**  
+After a failed read or write on a channel pushed or opened with
+**-blinding self**, the number of milliseconds s2n asks the program to
+wait before closing it; 0 when there was no error.
+
 ## EXAMPLES
 
 Connect to an HTTPS server, request /
@@ -123,6 +155,28 @@ puts ""
 chan configure $sock -translation binary
 puts [read $sock]
 close $sock
+```
+
+Serve TLS on port 8443 with a certificate and its key, from an
+event-driven server
+
+``` tcl
+set config  [list certificates [list [list [readfile cert.pem] [readfile key.pem]]]]
+socket -server [list apply {{config sock args} {
+    chan configure $sock -blocking 0 -buffering none -translation crlf
+    s2n::push $sock -role server -blinding self -config $config
+    chan event $sock readable [list apply {sock {
+        if {[catch {gets $sock line}]} {
+            # Wait as long as s2n asks before closing a connection that failed
+            after [chan configure $sock -blinding_delay] [list close $sock]
+            chan event $sock readable {}
+            return
+        }
+        if {[eof $sock]} {close $sock; return}
+        if {[chan blocked $sock]} return
+        puts $sock "echo: $line"
+    }} $sock]
+}} $config] 8443
 ```
 
 ## BUILDING
@@ -148,9 +202,9 @@ README).
 ### From a release tarball
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.1/s2n-0.8.1.tar.gz
-tar xf s2n-0.8.1.tar.gz
-cd s2n-0.8.1
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.5/s2n-0.8.5.tar.gz
+tar xf s2n-0.8.5.tar.gz
+cd s2n-0.8.5
 meson setup build
 meson compile -C build
 meson test -C build
@@ -236,7 +290,7 @@ to use mlock. For example, using docker that looks like this:
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.8.1
+0.8.5
 tclsh8.7 [/here] 
 ```
 
@@ -247,7 +301,7 @@ cost of losing the mlock protection for key material):
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.8.1
+0.8.5
 tclsh8.7 [/here]
 ```
 

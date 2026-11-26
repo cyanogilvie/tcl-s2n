@@ -1,0 +1,194 @@
+source [file join [file dirname [info script]] common.tcl]
+
+# Server role, with the certificates config: tests/certs has a test CA and two leaf certificates
+# it signed (a.test and b.test, each with a wildcard), so a client that trusts only that CA and
+# checks the name it asked for proves which certificate the server chose.  Both ends are
+# non-blocking in this interp, on the event loop
+
+namespace eval server_test {
+	variable certs	[file join [file dirname [file normalize [info script]]] certs]
+
+	proc pem name { #<<<
+		variable certs
+		set h	[open [file join $certs $name]]
+		try {read $h} finally {close $h}
+	}
+
+	#>>>
+	proc pair name {list [pem $name.pem] [pem $name.key]}
+
+	proc push_server config { # Push the server role with $config onto a connected socket: push's result (closed again) <<<
+		set listen	[socket -server {apply {{sock args} {close $sock}}} -myaddr 127.0.0.1 0]
+		set sock	[socket 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+		chan configure $sock -blocking 0
+		try {
+			s2n::push $sock -role server -config $config
+		} finally {
+			catch {close $sock}
+			close $listen
+		}
+	}
+
+	#>>>
+
+	proc accept {config sock args} { #<<<
+		variable server_err
+		chan configure $sock -blocking 0 -buffering none -translation binary
+		try {
+			s2n::push $sock -role server -blinding self {*}[if {$config ne ""} {list -config $config}]
+		} on error {errmsg options} {
+			set server_err $errmsg
+			close $sock
+			return
+		}
+		chan event $sock readable [list [namespace current]::serve $sock]
+	}
+
+	#>>>
+	proc serve sock { #<<<
+		variable server_err
+		variable server_delay
+		try {
+			set line	[gets $sock]
+		} on error errmsg {
+			set server_err		$errmsg
+			set server_delay	[chan configure $sock -blinding_delay]
+			close $sock
+			return
+		}
+		if {[eof $sock]} {close $sock; return}
+		if {[chan blocked $sock]} return
+		puts -nonewline $sock "echo: $line\n"
+		close $sock
+	}
+
+	#>>>
+	proc roundtrip {config servername} { # Connect as a client asking for $servername, trusting only the test CA: what the server answered, or the error <<<
+		variable certs
+		variable result
+		variable server_err
+		variable rx
+		unset -nocomplain result server_err server_delay
+		set rx	{}
+
+		set listen	[socket -server [list [namespace current]::accept $config] -myaddr 127.0.0.1 0]
+		set port	[lindex [chan configure $listen -sockname] 2]
+		try {
+			set sock	[s2n::socket -async -blinding self -servername $servername -config [list ca_file [file join $certs ca.pem]] 127.0.0.1 $port]
+			chan configure $sock -blocking 0 -buffering none -translation binary
+			chan event $sock writable [list apply {{sock ns} {
+				chan event $sock writable {}
+				try {
+					puts -nonewline $sock "hello\n"
+				} on error errmsg {
+					set ${ns}::result [list error $errmsg]
+				}
+			}} $sock [namespace current]]
+			chan event $sock readable [list apply {{sock ns} {
+				try {
+					append ${ns}::rx [read $sock]
+				} on error errmsg {
+					set ${ns}::result [list error $errmsg]
+					return
+				}
+				if {[eof $sock]} {set ${ns}::result [list ok [set ${ns}::rx]]}
+			}} $sock [namespace current]]
+			set timeout	[after 5000 [list set [namespace current]::result timeout]]
+			vwait [namespace current]::result
+			after cancel $timeout
+			set result
+		} finally {
+			if {[info exists sock] && $sock in [chan names]} {catch {close $sock}}
+			close $listen
+		}
+	}
+
+	#>>>
+}
+
+test server-1.1 {A server with one certificate: a client checking its name gets through} -body { #<<<
+	server_test::roundtrip [list certificates [list [server_test::pair a]]] a.test
+} -result [list ok "echo: hello\n"]
+#>>>
+test server-1.2 {A wildcard name in the certificate} -body { #<<<
+	server_test::roundtrip [list certificates [list [server_test::pair a]]] www.a.test
+} -result [list ok "echo: hello\n"]
+#>>>
+test server-1.3 {A name the certificate doesn't cover fails the client's check} -body { #<<<
+	lindex [server_test::roundtrip [list certificates [list [server_test::pair a]]] b.test] 0
+} -result error
+#>>>
+test server-2.1 {Two certificates: SNI picks the second} -body { #<<<
+	server_test::roundtrip [list certificates [list [server_test::pair a] [server_test::pair b]]] www.b.test
+} -result [list ok "echo: hello\n"]
+#>>>
+test server-2.2 {Two certificates: SNI picks the first} -body { #<<<
+	server_test::roundtrip [list certificates [list [server_test::pair a] [server_test::pair b]]] a.test
+} -result [list ok "echo: hello\n"]
+#>>>
+test server-2.3 {Two certificates, a name neither covers: no handshake} -body { #<<<
+	lindex [server_test::roundtrip [list certificates [list [server_test::pair a] [server_test::pair b]]] c.test] 0
+} -result error
+#>>>
+test server-2.4 {The same config value serves many connections} -body { #<<<
+	set config	[list certificates [list [server_test::pair a] [server_test::pair b]]]
+	lmap name {a.test b.test x.a.test x.b.test} {lindex [server_test::roundtrip $config $name] 0}
+} -cleanup {
+	unset -nocomplain config
+} -result {ok ok ok ok}
+#>>>
+test server-3.1 {A server without certificates can't handshake: both ends hear of it, and nothing sleeps} -body { #<<<
+	set start	[clock milliseconds]
+	list [lindex [server_test::roundtrip "" a.test] 0] [info exists server_test::server_err] [expr {[clock milliseconds] - $start < 2000}]
+} -cleanup {
+	unset -nocomplain start
+} -result {error 1 1}
+#>>>
+test server-3.2 {-blinding self: the channel says how long s2n wants us to wait before closing} -body { #<<<
+	server_test::roundtrip "" a.test
+	expr {$server_test::server_delay >= 10000 && $server_test::server_delay <= 30000}
+} -result 1
+#>>>
+test server-3.3 {-blinding: a bad value} -body { #<<<
+	set listen	[socket -server {apply {{sock args} {close $sock}}} -myaddr 127.0.0.1 0]
+	set sock	[socket 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+	s2n::push $sock -role server -blinding none
+} -cleanup {
+	catch {close $sock}
+	close $listen
+	unset -nocomplain sock listen
+} -returnCodes error -result {bad blinding "none": must be builtin or self}
+#>>>
+test server-3.4 {-blinding_delay is 0 on a healthy connection} -body { #<<<
+	set listen	[socket -server {apply {{sock args} {close $sock}}} -myaddr 127.0.0.1 0]
+	set sock	[socket 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+	chan configure $sock -blocking 0
+	s2n::push $sock -role server -blinding self -config [list certificates [list [server_test::pair a]]]
+	chan configure $sock -blinding_delay
+} -cleanup {
+	catch {close $sock}
+	close $listen
+	unset -nocomplain sock listen
+} -result 0
+#>>>
+test server-4.1 {certificates: an entry that isn't a pair} -body { #<<<
+	server_test::push_server [list certificates [list [list [server_test::pem a.pem]]]]
+} -returnCodes error -match glob -result {each certificates entry must be a list of two PEM strings, the chain and its key: *}
+#>>>
+test server-4.2 {certificates: an empty list} -body { #<<<
+	server_test::push_server {certificates {}}
+} -returnCodes error -result {certificates must name at least one {chain key} pair}
+#>>>
+test server-4.3 {certificates: a key that isn't the chain's} -body { #<<<
+	server_test::push_server [list certificates [list [list [server_test::pem a.pem] [server_test::pem b.key]]]]
+} -returnCodes error -match glob -errorCode {S2N *} -result *
+#>>>
+test server-4.4 {certificates: not PEM} -body { #<<<
+	server_test::push_server {certificates {{notpem notpem}}}
+} -returnCodes error -match glob -errorCode {S2N *} -result *
+#>>>
+
+::tcltest::cleanupTests
+return
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4

@@ -1,0 +1,4 @@
+Test-only certificates (tests/server.test): a CA (ca.pem) and two leaf certificates
+it signed, a.pem for a.test and *.a.test, b.pem for b.test and *.b.test, with their
+keys (PKCS#8).  Valid for 100 years.  The CA's key was discarded: regenerate them all
+together if they need to change.  Never trust them anywhere but these tests.

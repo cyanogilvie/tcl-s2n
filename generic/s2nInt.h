@@ -127,6 +127,8 @@ struct con_cx {
 	size_t					read_count;		// Number of plaintext bytes read
 
 	int						handshake_done;
+	int						handshake_failed;	// 0, or the errno a non-blocking handshake failed with:
+												// the channel's reads and writes then fail with it
 	int						read_closed;
 	int						write_closed;
 	int						registered;
@@ -141,8 +143,10 @@ struct con_cx {
 };
 
 struct s2n_config_rc {
-	Tcl_Size			refCount;
-	struct s2n_config*	c;
+	Tcl_Size							refCount;
+	struct s2n_config*					c;
+	struct s2n_cert_chain_and_key**		certs;		// The certificates config's store holds (a server's), which
+	Tcl_Size							ncerts;		// it doesn't own: freed after c
 };
 
 #ifdef __cplusplus

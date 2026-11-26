@@ -1,4 +1,5 @@
 #include "s2nInt.h"
+#include <inttypes.h>
 #include "defer.h"
 
 // Must be kept in sync with the enum in s2nInt.tcl
@@ -151,6 +152,13 @@ static int s2n_stacked_chan_get_option(ClientData cdata, Tcl_Interp* interp, con
 		Tcl_DStringAppendElement(val, "-protocol");
 		Tcl_DStringAppendElement(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)));
 
+		Tcl_DStringAppendElement(val, "-blinding_delay");
+		{
+			char	buf[32];
+			snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
+			Tcl_DStringAppendElement(val, buf);
+		}
+
 	} else if (strcmp(optname, "-servername") == 0) {
 		const char*		servername = s2n_get_server_name(con_cx->s2n_con);
 		if (servername) Tcl_DStringAppend(val, servername, -1);
@@ -168,8 +176,14 @@ static int s2n_stacked_chan_get_option(ClientData cdata, Tcl_Interp* interp, con
 	} else if (strcmp(optname, "-protocol") == 0) {
 		Tcl_DStringAppend(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)), -1);
 
+	} else if (strcmp(optname, "-blinding_delay") == 0) {
+		// Milliseconds (rounded up) to wait before closing after an error, with -blinding self
+		char	buf[32];
+		snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
+		Tcl_DStringAppend(val, buf, -1);
+
 	} else {
-		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol");
+		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol blinding_delay");
 		Tcl_SetErrno(EINVAL);
 		goto finally;
 	}
@@ -184,7 +198,7 @@ static void s2n_stacked_chan_watch(ClientData cdata, int mask) //<<<
 	struct con_cx*	con_cx = cdata;
 	const int gotmask = mask;
 
-	if (!con_cx->handshake_done) {
+	if (!con_cx->handshake_done && !con_cx->handshake_failed) {
 		// While the handshake is busy, signal that we want to be notified when IO is possible
 		mask &= TCL_EXCEPTION;
 		switch (con_cx->blocked) {
@@ -206,6 +220,7 @@ static int s2n_stacked_chan_handler(ClientData cdata, int mask) //<<<
 	struct con_cx*	con_cx = cdata;
 
 	CLOGS(IO, "mask: %s, handshake_done: %d", mask_str(mask), con_cx->handshake_done);
+	if (con_cx->handshake_failed) return TCL_READABLE | TCL_WRITABLE;
 	if (!con_cx->handshake_done) {
 		// While the handshake is busy, don't report readable and writable to
 		// the users of this channel - the only IO that can happen on the
@@ -237,12 +252,14 @@ static int s2n_stacked_chan_handler(ClientData cdata, int mask) //<<<
 					break;
 				}
 
-				case S2N_ERR_T_IO:
-					fprintf(stderr, "s2n_stacked_chan_handler: s2n_negotiate failed: %s, errno: %d\n", s2n_strerror(s2n_errno, "EN"), errno);
-					break;
-
 				default:
-					fprintf(stderr, "s2n_stacked_chan_handler: s2n_negotiate failed: %s\n", s2n_strerror(s2n_errno, "EN"));
+					// The handshake failed (the peer went away or broke the protocol): tell the
+					// channel's users, whose next read or write gets the error.  Reporting
+					// nothing left the base channel readable forever, this handler called in a
+					// loop and the script never knowing
+					CLOGS(HANDSHAKE, "s2n_stacked_chan_handler: s2n_negotiate failed: %s, errno: %d", s2n_strerror(s2n_errno, "EN"), errno);
+					con_cx->handshake_failed = (s2n_error_get_type(s2n_errno) == S2N_ERR_T_IO && errno) ? errno : ECONNRESET;
+					mask = TCL_READABLE | TCL_WRITABLE;
 					break;
 			}
 		}
@@ -350,6 +367,13 @@ static int s2n_direct_chan_get_option(ClientData cdata, Tcl_Interp* interp, cons
 		Tcl_DStringAppendElement(val, "-protocol");
 		Tcl_DStringAppendElement(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)));
 
+		Tcl_DStringAppendElement(val, "-blinding_delay");
+		{
+			char	buf[32];
+			snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
+			Tcl_DStringAppendElement(val, buf);
+		}
+
 	} else if (strcmp(optname, "-servername") == 0) {
 		const char*		servername = s2n_get_server_name(con_cx->s2n_con);
 		if (servername) Tcl_DStringAppend(val, servername, -1);
@@ -367,8 +391,14 @@ static int s2n_direct_chan_get_option(ClientData cdata, Tcl_Interp* interp, cons
 	} else if (strcmp(optname, "-protocol") == 0) {
 		Tcl_DStringAppend(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)), -1);
 
+	} else if (strcmp(optname, "-blinding_delay") == 0) {
+		// Milliseconds (rounded up) to wait before closing after an error, with -blinding self
+		char	buf[32];
+		snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
+		Tcl_DStringAppend(val, buf, -1);
+
 	} else {
-		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol");
+		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol blinding_delay");
 		Tcl_SetErrno(EINVAL);
 		goto finally;
 	}
@@ -383,7 +413,7 @@ static void s2n_direct_chan_watch(ClientData cdata, int mask) //<<<
 	struct con_cx*	con_cx = cdata;
 	const int gotmask = mask;
 
-	if (!con_cx->handshake_done) {
+	if (!con_cx->handshake_done && !con_cx->handshake_failed) {
 		// While the handshake is busy, signal that we want to be notified when IO is possible
 		mask &= TCL_EXCEPTION;
 		if (!con_cx->connected) mask |= TCL_WRITABLE;
@@ -421,7 +451,9 @@ static void s2n_direct_chan_handler(ClientData cdata, int mask) //<<<
 		CLOGS(IO, "mask: %s, connected: %d, handshake_done: %d", mask_str(mask), con_cx->connected, con_cx->handshake_done);
 	}
 
-	if (!con_cx->handshake_done) {
+	if (con_cx->handshake_failed) {
+		mask = TCL_READABLE | TCL_WRITABLE;
+	} else if (!con_cx->handshake_done) {
 		// While the handshake is busy, don't report readable and writable to
 		// the users of this channel - the only IO that can happen on the
 		// channel is the TLS handshake, handled internally.
@@ -451,12 +483,14 @@ static void s2n_direct_chan_handler(ClientData cdata, int mask) //<<<
 					break;
 				}
 
-				case S2N_ERR_T_IO:
-					fprintf(stderr, "s2n_direct_chan_handler: s2n_negotiate failed: %s, errno: %d\n", s2n_strerror(s2n_errno, "EN"), errno);
-					break;
-
 				default:
-					fprintf(stderr, "s2n_direct_chan_handler: s2n_negotiate failed: %s\n", s2n_strerror(s2n_errno, "EN"));
+					// The handshake failed (the peer went away or broke the protocol): tell the
+					// channel's users, whose next read or write gets the error.  Reporting
+					// nothing left the base channel readable forever, this handler called in a
+					// loop and the script never knowing
+					CLOGS(HANDSHAKE, "s2n_direct_chan_handler: s2n_negotiate failed: %s, errno: %d", s2n_strerror(s2n_errno, "EN"), errno);
+					con_cx->handshake_failed = (s2n_error_get_type(s2n_errno) == S2N_ERR_T_IO && errno) ? errno : ECONNRESET;
+					mask = TCL_READABLE | TCL_WRITABLE;
 					break;
 			}
 		}
@@ -486,6 +520,10 @@ static int s2n_common_chan_input(ClientData cdata, char* buf, int toRead, int* e
 	int					read_total = 0;
 
 	if (con_cx->read_closed) return 0;
+	if (con_cx->handshake_failed) {
+		*errorCodePtr = con_cx->handshake_failed;
+		return -1;
+	}
 
 	CLOGS(IO, "--> toRead: %d", toRead);
 	while (remain) {
@@ -537,6 +575,10 @@ static int s2n_common_chan_output(ClientData cdata, const char* buf, int toWrite
 	if (con_cx->write_closed) {
 		CLOGS(IO, "write closed");
 		*errorCodePtr = EPIPE;
+		return -1;
+	}
+	if (con_cx->handshake_failed) {
+		*errorCodePtr = con_cx->handshake_failed;
 		return -1;
 	}
 
@@ -830,6 +872,11 @@ static void tcls2n_config_rc_release(struct s2n_config_rc** rc) //<<<
 				CLOGS(LIFECYCLE, "s2n_config_free failed: %s\n", s2n_strerror(s2n_errno, "EN"));
 			(*rc)->c = NULL;
 		}
+		for (Tcl_Size i=0; i<(*rc)->ncerts; i++) {
+			if (-1 == s2n_cert_chain_and_key_free((*rc)->certs[i]))
+				CLOGS(LIFECYCLE, "s2n_cert_chain_and_key_free failed: %s\n", s2n_strerror(s2n_errno, "EN"));
+		}
+		if ((*rc)->certs) ckfree((*rc)->certs);
 		ckfree(*rc);
 		*rc = NULL;
 	}
@@ -893,6 +940,7 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 			"cipher_preferences",
 			"ca_file",
 			"ca_dir",
+			"certificates",
 			NULL
 		};
 		enum config {
@@ -901,6 +949,7 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 			CONFIG_CIPHER_PREFERENCES,
 			CONFIG_CA_FILE,
 			CONFIG_CA_DIR,
+			CONFIG_CERTIFICATES,
 		} conf_name;
 		int conf_name_int;
 
@@ -942,6 +991,36 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 			case CONFIG_CA_DIR:
 				ca_dir = Tcl_GetString(val);
 				break;
+
+			case CONFIG_CERTIFICATES:
+			{
+				// A server's certificates: a list of {chain key} pairs, each a PEM string (the chain
+				// leaf first, the key's PEM in any form s2n reads).  s2n picks the one for the
+				// client's SNI name, or the first when none matches
+				Tcl_Obj**	ov;
+				Tcl_Size	oc;
+
+				TEST_OK(Tcl_ListObjGetElements(interp, val, &oc, &ov));
+				if (oc == 0) THROW_ERROR("certificates must name at least one {chain key} pair");
+				for (Tcl_Size i=0; i<oc; i++) {
+					Tcl_Obj**	pv;
+					Tcl_Size	pc;
+
+					TEST_OK(Tcl_ListObjGetElements(interp, ov[i], &pc, &pv));
+					if (pc != 2) THROW_ERROR("each certificates entry must be a list of two PEM strings, the chain and its key: ", Tcl_GetString(ov[i]));
+
+					struct s2n_cert_chain_and_key*	ck = s2n_cert_chain_and_key_new();
+					if (ck == NULL) CHECK_S2N(S2N_FAILURE);
+					// Owned by rc from here, freed with it (on a failure below too)
+					rc->certs = (struct s2n_cert_chain_and_key**)(rc->certs ?
+						ckrealloc(rc->certs, (rc->ncerts+1) * sizeof *rc->certs) :
+						ckalloc(sizeof *rc->certs));
+					rc->certs[rc->ncerts++] = ck;
+					CHECK_S2N(s2n_cert_chain_and_key_load_pem(ck, Tcl_GetString(pv[0]), Tcl_GetString(pv[1])));
+					CHECK_S2N(s2n_config_add_cert_chain_and_key_to_store(c, ck));
+				}
+				break;
+			}
 
 			default: THROW_ERROR("Unhandled config: ", Tcl_GetString(key));
 		}
@@ -1006,6 +1085,19 @@ static int s2n_basechan_recv(void* io_context, uint8_t* buf, uint32_t len) //<<<
 
 // Internal API >>>
 // Script API <<<
+static int set_blinding(Tcl_Interp* interp, struct s2n_connection* con, Tcl_Obj* mode) //<<<
+{
+	// builtin: s2n's own, which sleeps the calling thread 10-30 s after a TLS error (tampering, a
+	// broken handshake).  self: no sleep, the channel's -blinding_delay says how long to wait
+	// before closing, for event-driven code serving many connections in one thread
+	static const char* modes[] = { "builtin", "self", NULL };
+	int idx;
+	TEST_OK(Tcl_GetIndexFromObj(interp, mode, modes, "blinding", 0, &idx));
+	CHECK_S2N(s2n_connection_set_blinding(con, idx == 0 ? S2N_BUILT_IN_BLINDING : S2N_SELF_SERVICE_BLINDING));
+	return TCL_OK;
+}
+
+//>>>
 static OBJCMD(push_cmd) //<<<
 {
 	(void)cdata;
@@ -1014,6 +1106,7 @@ static OBJCMD(push_cmd) //<<<
 		"-role",
 		"-servername",
 		"-prefer",
+		"-blinding",
 		NULL
 	};
 	enum opt {
@@ -1021,6 +1114,7 @@ static OBJCMD(push_cmd) //<<<
 		OPT_ROLE,
 		OPT_SERVERNAME,
 		OPT_PREFER,
+		OPT_BLINDING,
 	};
 	static const char* s2n_role_str[] = { "client", "server", NULL };
 	enum role { ROLE_CLIENT, ROLE_SERVER } role = ROLE_CLIENT;
@@ -1057,6 +1151,7 @@ static OBJCMD(push_cmd) //<<<
 			case OPT_CONFIG:
 			case OPT_SERVERNAME:
 			case OPT_PREFER:
+			case OPT_BLINDING:
 				i++;
 				break;
 
@@ -1099,6 +1194,11 @@ static OBJCMD(push_cmd) //<<<
 			case OPT_SERVERNAME:
 				if (i == objc-1) THROW_ERROR("Missing value for -servername");
 				CHECK_S2N(s2n_set_server_name(con_cx->s2n_con, Tcl_GetString(objv[++i])));
+				break;
+
+			case OPT_BLINDING:
+				if (i == objc-1) THROW_ERROR("Missing value for -blinding");
+				TEST_OK(set_blinding(interp, con_cx->s2n_con, objv[++i]));
 				break;
 
 			case OPT_PREFER: //<<<
@@ -1180,6 +1280,7 @@ static OBJCMD(socket_cmd) //<<<
 		"-config",
 		"-servername",
 		"-prefer",
+		"-blinding",
 		NULL
 	};
 	enum opt {
@@ -1187,6 +1288,7 @@ static OBJCMD(socket_cmd) //<<<
 		OPT_CONFIG,
 		OPT_SERVERNAME,
 		OPT_PREFER,
+		OPT_BLINDING,
 	};
 	int					async = 0;
 	struct sockaddr_un	uds = {.sun_family = AF_UNIX};
@@ -1300,6 +1402,11 @@ static OBJCMD(socket_cmd) //<<<
 			case OPT_SERVERNAME:
 				if (i == objc-1) THROW_ERROR("Missing value for -servername");
 				CHECK_S2N(s2n_set_server_name(con_cx->s2n_con, Tcl_GetString(objv[++i])));
+				break;
+
+			case OPT_BLINDING:
+				if (i == objc-1) THROW_ERROR("Missing value for -blinding");
+				TEST_OK(set_blinding(interp, con_cx->s2n_con, objv[++i]));
 				break;
 
 			case OPT_PREFER: //<<<
