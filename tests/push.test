@@ -191,8 +191,7 @@ test push-5.1 {blocking basechan: a reply shorter than the read buffer comes bac
 	unset -nocomplain sock statuses i line
 } -match glob -result {{HTTP/1.1 200 *} {HTTP/1.1 200 *}}
 #>>>
-test push-4.1 {negotiation failed early, nonblocking} -setup { #<<<
-} -body {
+test push-4.1 {negotiation failed early, nonblocking} -constraints have_aio -body { #<<<
 	set sock	[socket api.sandbox.paypal.com 443]
 	chan configure $sock -blocking 0
 	s2n::push $sock -servername api.sandbox.paypal.com -role client
