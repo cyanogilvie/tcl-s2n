@@ -4,7 +4,7 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.9.0?
+**package require s2n** ?0.9.1?
 
 **s2n::push** *channelName* ?*-opt* *val* …?\
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -228,9 +228,9 @@ README).
 ### From a release tarball
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.9.0/s2n-0.9.0.tar.gz
-tar xf s2n-0.9.0.tar.gz
-cd s2n-0.9.0
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.9.1/s2n-0.9.1.tar.gz
+tar xf s2n-0.9.1.tar.gz
+cd s2n-0.9.1
 meson setup build
 meson compile -C build
 meson test -C build
@@ -316,7 +316,7 @@ to use mlock. For example, using docker that looks like this:
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.9.0
+0.9.1
 tclsh8.7 [/here] 
 ```
 
@@ -327,7 +327,7 @@ cost of losing the mlock protection for key material):
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.9.0
+0.9.1
 tclsh8.7 [/here]
 ```
 
