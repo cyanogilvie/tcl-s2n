@@ -16,3 +16,9 @@
 	fun:UnloadLibrary
 	...
 }
+{
+	aws-lc's optimised OPENSSL_strlcat reads past the NUL within err_add_error_vdata's own buffer (harmless: seen with aws-lc v1.71 and v5.15, from the file BIO's error on a missing file)
+	Memcheck:Cond
+	fun:*OPENSSL_strlcat
+	fun:err_add_error_vdata
+}
