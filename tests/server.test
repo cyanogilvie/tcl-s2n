@@ -68,8 +68,10 @@ namespace eval server_test {
 		variable result
 		variable server_err
 		variable rx
+		variable protocol
 		unset -nocomplain result server_err server_delay
-		set rx	{}
+		set rx			{}
+		set protocol	{}
 
 		set listen	[socket -server [list [namespace current]::accept $config] -myaddr 127.0.0.1 0]
 		set port	[lindex [chan configure $listen -sockname] 2]
@@ -91,7 +93,10 @@ namespace eval server_test {
 					set ${ns}::result [list error $errmsg]
 					return
 				}
-				if {[eof $sock]} {set ${ns}::result [list ok [set ${ns}::rx]]}
+				if {[eof $sock]} {
+					set ${ns}::protocol	[chan configure $sock -protocol]
+					set ${ns}::result	[list ok [set ${ns}::rx]]
+				}
 			}} $sock [namespace current]]
 			set timeout	[after 5000 [list set [namespace current]::result timeout]]
 			vwait [namespace current]::result
@@ -113,6 +118,13 @@ test server-1.1 {A server with one certificate: a client checking its name gets 
 test server-1.2 {A wildcard name in the certificate} -body { #<<<
 	server_test::roundtrip [list certificates [list [server_test::pair a]]] www.a.test
 } -result [list ok "echo: hello\n"]
+#>>>
+test server-1.4 {A client and a server with the default security policy negotiate TLS 1.3} -body { #<<<
+	# Not without RSA-PSS from the libcrypto, which s2n-tls's build learns from its feature probes:
+	# a build without them (as release tarballs were, trimmed) offered only TLS 1.2 as a client
+	server_test::roundtrip [list certificates [list [server_test::pair a]]] a.test
+	set server_test::protocol
+} -result TLSv1.3
 #>>>
 test server-1.3 {A name the certificate doesn't cover fails the client's check} -body { #<<<
 	lindex [server_test::roundtrip [list certificates [list [server_test::pair a]]] b.test] 0

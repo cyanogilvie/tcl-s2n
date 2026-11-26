@@ -23,6 +23,7 @@
         "SEARCH_LIBCRYPTO":     "OFF",
         "S2N_INTERN_LIBCRYPTO": "ON",
         "S2N_LTO":              "OFF",
+        "S2N_ENFORCE_PROPER_LIBCRYPTO_FEATURE_PROBE": "ON",
         "CMAKE_PREFIX_PATH":    "${prefix}",
         "CMAKE_INSTALL_PREFIX": "${prefix}"
       }

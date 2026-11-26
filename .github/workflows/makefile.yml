@@ -49,6 +49,19 @@ jobs:
     - name: Generate dist tarball
       run: meson dist -C build-meson --no-tests --formats=gztar
 
+    - name: Build and test the dist tarball
+      # What packagers build (cftcl's apk among them): its trimming once dropped s2n-tls's feature
+      # probes, unseen by the checkout's build above
+      env:
+        PKG_CONFIG_PATH: /opt/tcl9/lib/pkgconfig
+      run: |
+        mkdir -p /tmp/dist
+        tar xzf build-meson/meson-dist/s2n-*.tar.gz -C /tmp/dist
+        cd /tmp/dist/s2n-*
+        meson setup build
+        meson compile -C build
+        meson test -C build --print-errorlogs
+
     - name: Upload tarball
       uses: actions/upload-artifact@v7
       with:

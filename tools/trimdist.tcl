@@ -45,6 +45,7 @@ foreach {base pattern} {
 	lappend hitlist {*}[find $base $pattern fn {
 		switch -glob -- $fn {
 			*/CMakeLists.txt		continue
+			deps/s2n-tls/tests		continue
 		}
 
 		file delete -force $fn
@@ -54,5 +55,13 @@ foreach {base pattern} {
 			set fn
 		}
 	}]
+}
+# s2n-tls's tests, but for its feature probes (tests/features): its CMake compiles them to learn
+# what the libcrypto supports, and without them assumes nothing, RSA-PSS (so a client's TLS 1.3)
+# included.  The interned build insists they ran (S2N_ENFORCE_PROPER_LIBCRYPTO_FEATURE_PROBE)
+foreach fn [glob -nocomplain -directory deps/s2n-tls/tests *] {
+	if {[file tail $fn] eq "features"} continue
+	file delete -force $fn
+	lappend hitlist [if {[file isdirectory $fn]} {string cat $fn /} else {set fn}]
 }
 puts "hitlist:\n\t[join  $hitlist \n\t]"
