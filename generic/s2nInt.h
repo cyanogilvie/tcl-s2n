@@ -129,6 +129,8 @@ struct con_cx {
 	int						handshake_done;
 	int						handshake_failed;	// 0, or the errno a non-blocking handshake failed with:
 												// the channel's reads and writes then fail with it
+	const char*				handshake_error;	// s2n's reason for it (a static string), or NULL
+	Tcl_TimerToken			fail_timer;			// Notifies the channel's users of the failure
 	int						read_closed;
 	int						write_closed;
 	int						registered;

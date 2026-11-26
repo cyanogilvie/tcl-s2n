@@ -64,6 +64,63 @@ static const char* action_str(int action) //<<<
 }
 
 //>>>
+static void append_blinding_delay(Tcl_DString* val, struct con_cx* con_cx, int element) //<<<
+{
+	// Milliseconds (rounded up) still to wait before closing after an error, with -blinding self.
+	// s2n reports UINT64_MAX when it can't say: no delay we could act on
+	const uint64_t	ns = s2n_connection_get_delay(con_cx->s2n_con);
+	char			buf[32];
+
+	snprintf(buf, sizeof buf, "%" PRIu64, ns == UINT64_MAX ? 0 : ns / 1000000 + (ns % 1000000 != 0));
+	if (element) {
+		Tcl_DStringAppendElement(val, buf);
+	} else {
+		Tcl_DStringAppend(val, buf, -1);
+	}
+}
+
+//>>>
+static void fail_handshake(struct con_cx* con_cx, int neg_errno) //<<<
+{
+	// Record that s2n_negotiate failed for good (s2n_errno still holds why, neg_errno is the
+	// errno it left): the channel's reads and writes fail with handshake_failed from here, and
+	// -handshake_error gives s2n's reason
+	const int	s2n_err = s2n_errno;
+
+	switch (s2n_error_get_type(s2n_err)) {
+		case S2N_ERR_T_IO:		con_cx->handshake_failed = neg_errno ? neg_errno : EIO;	break;
+		case S2N_ERR_T_CLOSED:	con_cx->handshake_failed = ECONNRESET;					break;
+		default:				con_cx->handshake_failed = EPROTO;						break;
+	}
+	con_cx->handshake_error = s2n_strerror(s2n_err, "EN");
+}
+
+//>>>
+static void fail_notify(ClientData cdata) //<<<
+{
+	struct con_cx*	con_cx = cdata;
+
+	con_cx->fail_timer = NULL;
+	// The handlers this calls may close the channel, freeing con_cx
+	Tcl_NotifyChannel(con_cx->chan, TCL_READABLE | TCL_WRITABLE);
+}
+
+//>>>
+static void fail_watch(struct con_cx* con_cx, int mask) //<<<
+{
+	// After a failed handshake the channel is readable and writable for as long as anyone is
+	// interested (each read or write reports the failure), whatever the state of the base
+	// channel or fd: a handshake that failed in s2n::push itself has no event coming
+	if (mask & (TCL_READABLE | TCL_WRITABLE)) {
+		if (con_cx->fail_timer == NULL)
+			con_cx->fail_timer = Tcl_CreateTimerHandler(0, fail_notify, con_cx);
+	} else if (con_cx->fail_timer) {
+		Tcl_DeleteTimerHandler(con_cx->fail_timer);
+		con_cx->fail_timer = NULL;
+	}
+}
+
+//>>>
 
 // Common driver parts <<<
 static int s2n_common_chan_input(ClientData cdata, char* buf, int toRead, int* errorCodePtr);
@@ -153,11 +210,10 @@ static int s2n_stacked_chan_get_option(ClientData cdata, Tcl_Interp* interp, con
 		Tcl_DStringAppendElement(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)));
 
 		Tcl_DStringAppendElement(val, "-blinding_delay");
-		{
-			char	buf[32];
-			snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
-			Tcl_DStringAppendElement(val, buf);
-		}
+		append_blinding_delay(val, con_cx, 1);
+
+		Tcl_DStringAppendElement(val, "-handshake_error");
+		Tcl_DStringAppendElement(val, con_cx->handshake_error ? con_cx->handshake_error : "");
 
 	} else if (strcmp(optname, "-servername") == 0) {
 		const char*		servername = s2n_get_server_name(con_cx->s2n_con);
@@ -177,13 +233,13 @@ static int s2n_stacked_chan_get_option(ClientData cdata, Tcl_Interp* interp, con
 		Tcl_DStringAppend(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)), -1);
 
 	} else if (strcmp(optname, "-blinding_delay") == 0) {
-		// Milliseconds (rounded up) to wait before closing after an error, with -blinding self
-		char	buf[32];
-		snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
-		Tcl_DStringAppend(val, buf, -1);
+		append_blinding_delay(val, con_cx, 0);
+
+	} else if (strcmp(optname, "-handshake_error") == 0) {
+		if (con_cx->handshake_error) Tcl_DStringAppend(val, con_cx->handshake_error, -1);
 
 	} else {
-		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol blinding_delay");
+		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol blinding_delay handshake_error");
 		Tcl_SetErrno(EINVAL);
 		goto finally;
 	}
@@ -198,7 +254,10 @@ static void s2n_stacked_chan_watch(ClientData cdata, int mask) //<<<
 	struct con_cx*	con_cx = cdata;
 	const int gotmask = mask;
 
-	if (!con_cx->handshake_done && !con_cx->handshake_failed) {
+	if (con_cx->handshake_failed) {
+		fail_watch(con_cx, mask);
+		mask = 0;
+	} else if (!con_cx->handshake_done) {
 		// While the handshake is busy, signal that we want to be notified when IO is possible
 		mask &= TCL_EXCEPTION;
 		switch (con_cx->blocked) {
@@ -220,7 +279,7 @@ static int s2n_stacked_chan_handler(ClientData cdata, int mask) //<<<
 	struct con_cx*	con_cx = cdata;
 
 	CLOGS(IO, "mask: %s, handshake_done: %d", mask_str(mask), con_cx->handshake_done);
-	if (con_cx->handshake_failed) return TCL_READABLE | TCL_WRITABLE;
+	if (con_cx->handshake_failed) return 0;		// fail_watch notifies the channel's users
 	if (!con_cx->handshake_done) {
 		// While the handshake is busy, don't report readable and writable to
 		// the users of this channel - the only IO that can happen on the
@@ -231,6 +290,7 @@ static int s2n_stacked_chan_handler(ClientData cdata, int mask) //<<<
 		CLOGS(HANDSHAKE, "handshake not done, calling s2n_negotiate");
 		con_cx->blocked = S2N_NOT_BLOCKED;
 		const int neg_rc = s2n_negotiate(con_cx->s2n_con, &con_cx->blocked);
+		const int neg_errno = errno;
 		if (neg_rc == S2N_SUCCESS) {
 			con_cx->handshake_done = 1;
 			mask |= TCL_WRITABLE;
@@ -257,8 +317,8 @@ static int s2n_stacked_chan_handler(ClientData cdata, int mask) //<<<
 					// channel's users, whose next read or write gets the error.  Reporting
 					// nothing left the base channel readable forever, this handler called in a
 					// loop and the script never knowing
-					CLOGS(HANDSHAKE, "s2n_stacked_chan_handler: s2n_negotiate failed: %s, errno: %d", s2n_strerror(s2n_errno, "EN"), errno);
-					con_cx->handshake_failed = (s2n_error_get_type(s2n_errno) == S2N_ERR_T_IO && errno) ? errno : ECONNRESET;
+					fail_handshake(con_cx, neg_errno);
+					CLOGS(HANDSHAKE, "s2n_stacked_chan_handler: s2n_negotiate failed: %s, errno: %d", con_cx->handshake_error, neg_errno);
 					mask = TCL_READABLE | TCL_WRITABLE;
 					break;
 			}
@@ -368,11 +428,10 @@ static int s2n_direct_chan_get_option(ClientData cdata, Tcl_Interp* interp, cons
 		Tcl_DStringAppendElement(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)));
 
 		Tcl_DStringAppendElement(val, "-blinding_delay");
-		{
-			char	buf[32];
-			snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
-			Tcl_DStringAppendElement(val, buf);
-		}
+		append_blinding_delay(val, con_cx, 1);
+
+		Tcl_DStringAppendElement(val, "-handshake_error");
+		Tcl_DStringAppendElement(val, con_cx->handshake_error ? con_cx->handshake_error : "");
 
 	} else if (strcmp(optname, "-servername") == 0) {
 		const char*		servername = s2n_get_server_name(con_cx->s2n_con);
@@ -392,13 +451,13 @@ static int s2n_direct_chan_get_option(ClientData cdata, Tcl_Interp* interp, cons
 		Tcl_DStringAppend(val, proto_str(s2n_connection_get_actual_protocol_version(con_cx->s2n_con)), -1);
 
 	} else if (strcmp(optname, "-blinding_delay") == 0) {
-		// Milliseconds (rounded up) to wait before closing after an error, with -blinding self
-		char	buf[32];
-		snprintf(buf, sizeof buf, "%" PRIu64, (s2n_connection_get_delay(con_cx->s2n_con) + 999999) / 1000000);
-		Tcl_DStringAppend(val, buf, -1);
+		append_blinding_delay(val, con_cx, 0);
+
+	} else if (strcmp(optname, "-handshake_error") == 0) {
+		if (con_cx->handshake_error) Tcl_DStringAppend(val, con_cx->handshake_error, -1);
 
 	} else {
-		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol blinding_delay");
+		code = Tcl_BadChannelOption(interp, optname, "servername prefer server_supports client_supports protocol blinding_delay handshake_error");
 		Tcl_SetErrno(EINVAL);
 		goto finally;
 	}
@@ -413,7 +472,13 @@ static void s2n_direct_chan_watch(ClientData cdata, int mask) //<<<
 	struct con_cx*	con_cx = cdata;
 	const int gotmask = mask;
 
-	if (!con_cx->handshake_done && !con_cx->handshake_failed) {
+	if (con_cx->handshake_failed) {
+		fail_watch(con_cx, mask);
+		Tcl_DeleteFileHandler(con_cx->fd);
+		return;
+	}
+
+	if (!con_cx->handshake_done) {
 		// While the handshake is busy, signal that we want to be notified when IO is possible
 		mask &= TCL_EXCEPTION;
 		if (!con_cx->connected) mask |= TCL_WRITABLE;
@@ -452,7 +517,9 @@ static void s2n_direct_chan_handler(ClientData cdata, int mask) //<<<
 	}
 
 	if (con_cx->handshake_failed) {
-		mask = TCL_READABLE | TCL_WRITABLE;
+		// fail_watch notifies the channel's users
+		Tcl_DeleteFileHandler(con_cx->fd);
+		mask = 0;
 	} else if (!con_cx->handshake_done) {
 		// While the handshake is busy, don't report readable and writable to
 		// the users of this channel - the only IO that can happen on the
@@ -462,6 +529,7 @@ static void s2n_direct_chan_handler(ClientData cdata, int mask) //<<<
 		CLOGS(HANDSHAKE, "handshake not done, calling s2n_negotiate");
 		con_cx->blocked = S2N_NOT_BLOCKED;
 		const int neg_rc = s2n_negotiate(con_cx->s2n_con, &con_cx->blocked);
+		const int neg_errno = errno;
 		if (neg_rc == S2N_SUCCESS) {
 			con_cx->handshake_done = 1;
 			mask |= TCL_WRITABLE;
@@ -488,8 +556,10 @@ static void s2n_direct_chan_handler(ClientData cdata, int mask) //<<<
 					// channel's users, whose next read or write gets the error.  Reporting
 					// nothing left the base channel readable forever, this handler called in a
 					// loop and the script never knowing
-					CLOGS(HANDSHAKE, "s2n_direct_chan_handler: s2n_negotiate failed: %s, errno: %d", s2n_strerror(s2n_errno, "EN"), errno);
-					con_cx->handshake_failed = (s2n_error_get_type(s2n_errno) == S2N_ERR_T_IO && errno) ? errno : ECONNRESET;
+					fail_handshake(con_cx, neg_errno);
+					CLOGS(HANDSHAKE, "s2n_direct_chan_handler: s2n_negotiate failed: %s, errno: %d", con_cx->handshake_error, neg_errno);
+					// The fd may stay readable (EOF): fail_watch takes over from the file handler
+					Tcl_DeleteFileHandler(con_cx->fd);
 					mask = TCL_READABLE | TCL_WRITABLE;
 					break;
 			}
@@ -551,10 +621,13 @@ static int s2n_common_chan_input(ClientData cdata, char* buf, int toRead, int* e
 					con_cx->read_closed = 1;
 					break;
 				default:
-					fprintf(stderr, "\ts2n_common_chan_input: s2n_recv failed: %s, errno: %d\n", s2n_strerror(s2n_errno, "EN"), errno);
-					*errorCodePtr = errno ? errno : EIO;
+				{
+					const int	recv_errno = errno;
+					CLOGS(IO, "s2n_recv failed: %s, errno: %d", s2n_strerror(s2n_errno, "EN"), recv_errno);
+					*errorCodePtr = recv_errno ? recv_errno : EIO;
 					read_total = -1;
 					break;
+				}
 			}
 			break;
 		}
@@ -641,15 +714,20 @@ static int s2n_common_chan_close2(ClientData cdata, Tcl_Interp* interp, int flag
 	CLOGS(IO, "--> %x", flags);
 
 	if (flags & TCL_CLOSE_READ) {
-		if (interp) {
-			Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_common_chan_close2: Cannot close read side"));
-			Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
-		}
+		// No result left in interp: Tcl 9 tries this on every full close and ignores the
+		// refusal, but returned our message as the close command's result
 		return EINVAL;
 	}
 
 	if (flags & TCL_CLOSE_WRITE) {
 		if (con_cx->write_closed) return 0;
+
+		// While a blinding delay runs (-blinding self) s2n refuses to send the close_notify: the
+		// connection has failed, there is nothing more to say on it
+		if (s2n_connection_get_delay(con_cx->s2n_con) > 0) {
+			con_cx->write_closed = 1;
+			return 0;
+		}
 
 		s2n_blocked_status blocked = S2N_NOT_BLOCKED;
 		const int rc = s2n_shutdown_send(con_cx->s2n_con, &blocked);
@@ -724,23 +802,32 @@ static int s2n_common_chan_close2(ClientData cdata, Tcl_Interp* interp, int flag
 		CLOGS(IO, "<-- 0 returning %d", posixcode);
 	}
 
-	if (!con_cx->write_closed) {
+	// Closed while a blinding delay runs (-blinding self, and the script didn't wait): s2n refuses
+	// to shut down then (S2N_ERR_SHUTDOWN_PAUSED), and the connection has failed anyway, so just
+	// tear it down
+	if (!con_cx->write_closed && s2n_connection_get_delay(con_cx->s2n_con) == 0) {
 		s2n_blocked_status blocked = S2N_NOT_BLOCKED;
 		CLOGS(IO, "calling s2n_shutdown %s", S2N_CON_NAME(con_cx->s2n_con));
 		const int rc = s2n_shutdown(con_cx->s2n_con, &blocked);
 		// TODO: Handle blocked?
 		if (rc != S2N_SUCCESS) {
 			const int err_type = s2n_error_get_type(s2n_errno);
+			const int shut_errno = errno;
+			// A peer that closed first can't take our close_notify: the write, or the read
+			// for its own close_notify, fails with one of these.  Nothing went wrong that a
+			// script closing its end could care about
+			const int peer_gone = err_type == S2N_ERR_T_IO &&
+				(shut_errno == EPIPE || shut_errno == ECONNRESET || shut_errno == ENOTCONN);
 			// BLOCKED / CLOSED are non-fatal — peer already gone, or handshake
 			// never completed. Record other errors on the interp but let the
 			// defer tear things down regardless.
-			if (err_type != S2N_ERR_T_BLOCKED && err_type != S2N_ERR_T_CLOSED) {
+			if (err_type != S2N_ERR_T_BLOCKED && err_type != S2N_ERR_T_CLOSED && !peer_gone) {
 				if (interp) {
 					Tcl_SetObjResult(interp, Tcl_ObjPrintf("s2n_shutdown failed: %s", s2n_strerror(s2n_errno, "EN")));
 					Tcl_SetErrorCode(interp, "S2N", "CHAN", "CLOSE2", NULL);
 				}
 				switch (err_type) {
-					case S2N_ERR_T_IO:		posixcode = errno ? errno : EIO;	break;
+					case S2N_ERR_T_IO:		posixcode = shut_errno ? shut_errno : EIO;	break;
 					case S2N_ERR_T_PROTO:	posixcode = EPROTO;					break;
 					default:				posixcode = EINVAL;					break;
 				}
@@ -756,6 +843,11 @@ static void s2n_common_chan_thread_action(ClientData cdata, int action) //<<<
 {
 	struct con_cx*	con_cx = cdata;
 	CLOGS(LIFECYCLE, "%s: %s", S2N_CON_NAME(con_cx->s2n_con), action_str(action));
+	if (action == TCL_CHANNEL_THREAD_REMOVE && con_cx->fail_timer) {
+		// Timers belong to the thread: the new one's watch call makes its own
+		Tcl_DeleteTimerHandler(con_cx->fail_timer);
+		con_cx->fail_timer = NULL;
+	}
 }
 
 //>>>
@@ -1007,7 +1099,7 @@ static int get_s2n_config_from_obj(Tcl_Interp* interp, Tcl_Obj* obj, struct s2n_
 					Tcl_Size	pc;
 
 					TEST_OK(Tcl_ListObjGetElements(interp, ov[i], &pc, &pv));
-					if (pc != 2) THROW_ERROR("each certificates entry must be a list of two PEM strings, the chain and its key: ", Tcl_GetString(ov[i]));
+					if (pc != 2) THROW_ERROR("each certificates entry must be a list of two PEM strings, the chain and its key");	// Not echoed: it may hold the key
 
 					struct s2n_cert_chain_and_key*	ck = s2n_cert_chain_and_key_new();
 					if (ck == NULL) CHECK_S2N(S2N_FAILURE);
@@ -1052,6 +1144,10 @@ void free_con_cx(struct con_cx* con_cx) //<<<
 {
 	CLOGS(LIFECYCLE, "free_con_cx: %s", clogs_name(con_cx));
 	if (con_cx->registered) forget_chan(con_cx);
+	if (con_cx->fail_timer) {
+		Tcl_DeleteTimerHandler(con_cx->fail_timer);
+		con_cx->fail_timer = NULL;
+	}
 	if (con_cx->s2n_con) {
 		CLOGS(LIFECYCLE, "Freeing s2n connection: %s", S2N_CON_NAME(con_cx->s2n_con));
 		if (-1 == s2n_connection_free(con_cx->s2n_con)) {
@@ -1230,8 +1326,21 @@ static OBJCMD(push_cmd) //<<<
 	CHECK_S2N(s2n_connection_set_send_cb(con_cx->s2n_con, s2n_basechan_send));
 	CHECK_S2N(s2n_connection_set_recv_cb(con_cx->s2n_con, s2n_basechan_recv));
 
+	// A non-blocking channel's handshake can fail at any later time, which its reads and writes
+	// report, so one that fails right here (the peer's bytes had already arrived) is reported the
+	// same way: the script has one place to handle it, with -blinding_delay to consult
+	int nonblocking = 0;
+	{
+		Tcl_DString	ds;
+		Tcl_DStringInit(&ds);
+		if (TCL_OK == Tcl_GetChannelOption(NULL, basechan, "-blocking", &ds))
+			nonblocking = strcmp(Tcl_DStringValue(&ds), "0") == 0;
+		Tcl_DStringFree(&ds);
+	}
+
 	CLOGS(HANDSHAKE, "s2n_negotiate");
 	const int neg_rc = s2n_negotiate(con_cx->s2n_con, &con_cx->blocked);
+	const int neg_errno = errno;
 
 	if (neg_rc == S2N_SUCCESS) {
 		CLOGS(HANDSHAKE, "s2n_negotiate success");
@@ -1257,6 +1366,10 @@ static OBJCMD(push_cmd) //<<<
 			}
 
 			default:
+				if (nonblocking) {
+					fail_handshake(con_cx, neg_errno);
+					break;
+				}
 				THROW_ERROR("s2n_negotiate failed: ", s2n_strerror(s2n_errno, "EN"));
 		}
 	}

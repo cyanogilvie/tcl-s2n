@@ -173,7 +173,13 @@ test server-3.4 {-blinding_delay is 0 on a healthy connection} -body { #<<<
 #>>>
 test server-4.1 {certificates: an entry that isn't a pair} -body { #<<<
 	server_test::push_server [list certificates [list [list [server_test::pem a.pem]]]]
-} -returnCodes error -match glob -result {each certificates entry must be a list of two PEM strings, the chain and its key: *}
+} -returnCodes error -result {each certificates entry must be a list of two PEM strings, the chain and its key}
+#>>>
+test server-4.1.1 {certificates: a malformed entry isn't echoed in the error (it may hold the key)} -body { #<<<
+	list [catch {server_test::push_server [list certificates [list [list [server_test::pem a.key]]]]} r o] [string match *PRIVATE* $r] [string match *PRIVATE* [dict get $o -errorinfo]]
+} -cleanup {
+	unset -nocomplain r o
+} -result {1 0 0}
 #>>>
 test server-4.2 {certificates: an empty list} -body { #<<<
 	server_test::push_server {certificates {}}
@@ -186,6 +192,163 @@ test server-4.3 {certificates: a key that isn't the chain's} -body { #<<<
 test server-4.4 {certificates: not PEM} -body { #<<<
 	server_test::push_server {certificates {{notpem notpem}}}
 } -returnCodes error -match glob -errorCode {S2N *} -result *
+#>>>
+
+# Handshakes that fail, as a server facing a peer that doesn't speak TLS: a handshake record
+# holding nonsense, which s2n rejects (and blinds) as soon as it reads it
+namespace eval server_test {
+	variable bad	[binary decode hex 16030100050100000100]
+
+	proc badpeer {when {blocking 0}} { # What the server's script sees: {push's outcome, the read's errorcode, -blinding_delay in range, has -handshake_error, close's outcome} <<<
+		variable bad
+		variable seen
+		unset -nocomplain seen
+
+		set listen	[socket -server [list apply {{when blocking ns sock args} {
+			# Give the peer's bytes time to arrive before the push (early), or push before they're sent
+			after [expr {$when eq "early" ? 100 : 0}] [list apply {{blocking ns sock} {
+				chan configure $sock -blocking $blocking -buffering none -translation binary
+				if {[catch {s2n::push $sock -role server -blinding self -config [list certificates [list [server_test::pair a]]]} r]} {
+					close $sock
+					set ${ns}::seen [list [list threw $r]]
+					return
+				}
+				chan event $sock readable [list apply {{ns sock} {
+					set code	[catch {read $sock} r o]
+					chan event $sock readable {}
+					set delay	[chan configure $sock -blinding_delay]
+					set ${ns}::seen [list \
+						pushed \
+						[if {$code} {lindex [dict get $o -errorcode] 1} else {list read ok}] \
+						[expr {$delay >= 10000 && $delay <= 30000}] \
+						[expr {[chan configure $sock -handshake_error] ne ""}] \
+						[list [catch {close $sock} r] $r] \
+					]
+				}} $ns $sock]
+			}} $blocking $ns $sock]
+		}} $when $blocking [namespace current]] -myaddr 127.0.0.1 0]
+		try {
+			set peer	[socket 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+			chan configure $peer -buffering none -translation binary
+			after [expr {$when eq "early" ? 0 : 100}] [list puts -nonewline $peer $bad]
+			set timeout	[after 5000 [list set [namespace current]::seen timeout]]
+			vwait [namespace current]::seen
+			after cancel $timeout
+			set seen
+		} finally {
+			catch {close $peer}
+			close $listen
+		}
+	}
+
+	#>>>
+}
+
+test server-5.1 {A handshake that fails within s2n::push (non-blocking): reported by the channel, with its blinding delay, and closing early is fine} -body { #<<<
+	server_test::badpeer early
+} -result {pushed EPROTO 1 1 {0 {}}}
+#>>>
+test server-5.2 {A handshake that fails later: the same} -body { #<<<
+	server_test::badpeer late
+} -result {pushed EPROTO 1 1 {0 {}}}
+#>>>
+test server-5.3 {A handshake that fails on a blocking channel: an error from s2n::push} -body { #<<<
+	server_test::badpeer early 1
+} -match glob -result {{threw {s2n_negotiate failed: *}}}
+#>>>
+test server-5.4 {A peer that disconnects mid-handshake: connection reset, nothing to blind} -body { #<<<
+	set listen	[socket -server {apply {{sock args} {
+		chan configure $sock -blocking 0 -buffering none -translation binary
+		s2n::push $sock -role server -blinding self -config [list certificates [list [server_test::pair a]]]
+		chan event $sock readable [list apply {sock {
+			set code	[catch {read $sock} r o]
+			set ::server_test::seen [list [lindex [dict get $o -errorcode] 1] [chan configure $sock -blinding_delay] [catch {close $sock}]]
+		}} $sock]
+	}}} -myaddr 127.0.0.1 0]
+	set peer	[socket 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+	chan configure $peer -buffering none -translation binary
+	puts -nonewline $peer [binary decode hex 160301]
+	close $peer
+	set timeout	[after 5000 {set ::server_test::seen timeout}]
+	vwait ::server_test::seen
+	after cancel $timeout
+	set ::server_test::seen
+} -cleanup {
+	close $listen
+	unset -nocomplain listen peer timeout
+} -result {ECONNRESET 0 0}
+#>>>
+test server-5.5 {A client (s2n::socket -async) refusing the server's certificate: EPROTO, the reason, its own delay, and an early close} -body { #<<<
+	set listen	[socket -server [list server_test::accept [list certificates [list [server_test::pair a]]]] -myaddr 127.0.0.1 0]
+	set sock	[s2n::socket -async -blinding self -servername b.test -config [list ca_file [file join $server_test::certs ca.pem]] 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+	chan configure $sock -blocking 0
+	chan event $sock readable [list apply {sock {
+		set code	[catch {read $sock} r o]
+		chan event $sock readable {}
+		set delay	[chan configure $sock -blinding_delay]
+		set ::server_test::seen [list \
+			[lindex [dict get $o -errorcode] 1] \
+			[expr {$delay >= 10000 && $delay <= 30000}] \
+			[expr {[chan configure $sock -handshake_error] ne ""}] \
+			[list [catch {close $sock} r] $r] \
+		]
+	}} $sock]
+	set timeout	[after 5000 {set ::server_test::seen timeout}]
+	vwait ::server_test::seen
+	after cancel $timeout
+	set ::server_test::seen
+} -cleanup {
+	close $listen
+	unset -nocomplain listen sock timeout
+} -result {EPROTO 1 1 {0 {}}}
+#>>>
+test server-5.6 {A failed handshake nobody is watching doesn't spin, and a write hears of it too} -body { #<<<
+	set listen	[socket -server {apply {{sock args} {
+		chan configure $sock -blocking 0 -buffering none -translation binary
+		s2n::push $sock -role server -blinding self -config [list certificates [list [server_test::pair a]]]
+		set ::server_test::ssock $sock
+	}}} -myaddr 127.0.0.1 0]
+	set peer	[socket 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+	chan configure $peer -buffering none -translation binary
+	after 50 [list puts -nonewline $peer $server_test::bad]
+	set cpu	{apply {{} {set h [open /proc/self/stat]; try {set s [read $h]} finally {close $h}; expr {[lindex $s 13]+[lindex $s 14]}}}}
+	# Let the handshake fail, then see that waiting costs (next to) no CPU time
+	after 300 {set ::server_test::seen 1}
+	vwait ::server_test::seen
+	set before	[{*}$cpu]
+	after 300 {set ::server_test::seen 2}
+	vwait ::server_test::seen
+	list [expr {[{*}$cpu] - $before < 10}] [catch {puts -nonewline $server_test::ssock x} r o] [lindex [dict get $o -errorcode] 1] [catch {close $server_test::ssock}]
+} -cleanup {
+	catch {close $peer}
+	close $listen
+	unset -nocomplain listen peer cpu before r o
+} -result {1 1 EPROTO 0}
+#>>>
+
+test server-6.1 {Closing after the peer closed first isn't an error, for either kind of channel} -body { #<<<
+	lmap first {server client} {
+		unset -nocomplain ::server_test::ssock ::server_test::seen
+		set listen	[socket -server {apply {{sock args} {
+			chan configure $sock -blocking 0 -buffering none -translation binary
+			s2n::push $sock -role server -config [list certificates [list [server_test::pair a]]]
+			set ::server_test::ssock $sock
+		}}} -myaddr 127.0.0.1 0]
+		set sock	[s2n::socket -async -servername a.test -config [list ca_file [file join $server_test::certs ca.pem]] 127.0.0.1 [lindex [chan configure $listen -sockname] 2]]
+		chan configure $sock -blocking 0
+		chan event $sock writable {set ::server_test::seen 1}	;# The handshake is done
+		set timeout	[after 5000 {set ::server_test::seen timeout}]
+		vwait ::server_test::seen
+		after cancel $timeout
+		chan event $sock writable {}
+		set order	[if {$first eq "server"} {list $::server_test::ssock $sock} else {list $sock $::server_test::ssock}]
+		set res		[lmap chan $order {list [catch {close $chan} r] $r}]
+		close $listen
+		set res
+	}
+} -cleanup {
+	unset -nocomplain listen sock timeout order res first chan r
+} -result {{{0 {}} {0 {}}} {{0 {}} {0 {}}}}
 #>>>
 
 ::tcltest::cleanupTests
