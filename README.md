@@ -4,7 +4,7 @@ s2n Tcl wrapper - layer TLS onto Tcl channels
 
 ## SYNOPSIS
 
-**package require s2n** ?0.8.5?
+**package require s2n** ?0.9.0?
 
 **s2n::push** *channelName* ?*-opt* *val* …?\
 **s2n::socket** ?*-opt* *val* …? *host* *port*
@@ -24,7 +24,14 @@ Stack a TLS protocol driver onto the channel *channelName*. See
 removed with the standard **chan pop** *channelName* Tcl command. The
 *channelName* channel may be blocking or non-blocking, and may be a
 socket created with **-async** and still be waiting for the connection
-to complete.
+to complete. If *channelName* is blocking the handshake is done before
+the command returns, and its failure is an error from the command. If
+it’s non-blocking the handshake proceeds in the background, and its
+failure (whenever it happens, even before the command returns) makes the
+channel readable and writable, and its reads and writes fail: with
+*ECONNRESET* if the peer went away, *EPROTO* for a TLS failure (see
+**-handshake_error**), or the error of the channel below. The same goes
+for a **s2n::socket** opened with **-async**.
 
 **s2n::socket** ?*-opt* *val* …? *host* *port*  
 Open a TCP connection to *host*:*port* and handshake with that host as a
@@ -65,7 +72,11 @@ thread for 10 to 30 seconds, which stops every other connection a
 single-threaded, event-driven program is serving. With **self** it
 doesn’t sleep: after a read or write fails, the channel’s
 **-blinding_delay** says how long to wait before closing it, which the
-program can do with **after** while it serves the others.
+program can do with **after** while it serves the others. Closing it
+sooner is allowed (and skips the TLS shutdown), but gives up the
+mitigation. **self** needs a non-blocking channel: on a blocking one a
+failed handshake is an error from **s2n::push** or **s2n::socket**
+itself, which leaves no channel to ask for the delay.
 
 **-async**  
 Only valid for **s2n::socket**: don’t block on establishing the
@@ -137,7 +148,15 @@ negotiated.
 **-blinding_delay**  
 After a failed read or write on a channel pushed or opened with
 **-blinding self**, the number of milliseconds s2n asks the program to
-wait before closing it; 0 when there was no error.
+wait, from now, before closing it: it counts down to 0 as the time
+passes. 0 when there was no error, or none that calls for blinding (the
+peer just disconnecting, for instance).
+
+**-handshake_error**  
+s2n’s description of why the handshake failed, on a non-blocking channel
+whose handshake did (a certificate that couldn’t be verified, for
+instance, which the POSIX error of the failed read or write can’t say);
+empty otherwise.
 
 ## EXAMPLES
 
@@ -161,10 +180,17 @@ Serve TLS on port 8443 with a certificate and its key, from an
 event-driven server
 
 ``` tcl
+proc readfile fn {set h [open $fn]; try {read $h} finally {close $h}}
 set config  [list certificates [list [list [readfile cert.pem] [readfile key.pem]]]]
 socket -server [list apply {{config sock args} {
     chan configure $sock -blocking 0 -buffering none -translation crlf
-    s2n::push $sock -role server -blinding self -config $config
+    try {
+        s2n::push $sock -role server -blinding self -config $config
+    } on error {errmsg options} {
+        # Not a failed handshake, which the handler below hears of: a bad config, say
+        close $sock
+        return -options $options $errmsg
+    }
     chan event $sock readable [list apply {sock {
         if {[catch {gets $sock line}]} {
             # Wait as long as s2n asks before closing a connection that failed
@@ -202,9 +228,9 @@ README).
 ### From a release tarball
 
 ``` sh
-wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.8.5/s2n-0.8.5.tar.gz
-tar xf s2n-0.8.5.tar.gz
-cd s2n-0.8.5
+wget https://github.com/cyanogilvie/tcl-s2n/releases/download/v0.9.0/s2n-0.9.0.tar.gz
+tar xf s2n-0.9.0.tar.gz
+cd s2n-0.9.0
 meson setup build
 meson compile -C build
 meson test -C build
@@ -290,7 +316,7 @@ to use mlock. For example, using docker that looks like this:
 ``` sh
 % docker run --rm -it --cap-add IPC_LOCK cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.8.5
+0.9.0
 tclsh8.7 [/here] 
 ```
 
@@ -301,7 +327,7 @@ cost of losing the mlock protection for key material):
 ``` sh
 % docker run --rm -it -e S2N_DONT_MLOCK=1 cyanogilvie/alpine-tcl:v0.9.87-stripped
 tclsh8.7 [/here] package require s2n
-0.8.5
+0.9.0
 tclsh8.7 [/here]
 ```
 
